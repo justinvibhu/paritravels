@@ -9,4 +9,9 @@
             "routePrefix": "/_/backend"
         }
     }
+
+    ,
+    "rewrites": [
+        { "source": "/(.*)", "destination": "/index.html" }
+    ]
 }
