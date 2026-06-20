@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import { SeatSelector } from './components/SeatSelector';
 
 const API_URL = "http://localhost:5000/api";
 
@@ -21,6 +22,7 @@ export default function BookingPage() {
     travelDate: '',
     passengers: 1,
   });
+  const [selectedSeats, setSelectedSeats] = useState([]);
 
   useEffect(() => {
     const fetchVehicleDetails = async () => {
@@ -81,6 +83,28 @@ export default function BookingPage() {
       }
 
       const newBooking = await response.json();
+
+      // Book seats if selected
+      if (selectedSeats.length > 0) {
+        const seatPayload = {
+          vehicleId: Number(vehicleId),
+          bookingId: newBooking.id,
+          seatNumbers: selectedSeats,
+          passengerName: formData.customerName
+        };
+
+        const seatResponse = await fetch(`${API_URL}/seat-bookings`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(seatPayload),
+        });
+
+        if (!seatResponse.ok) {
+          const errData = await seatResponse.json();
+          console.warn('Failed to book seats:', errData.error);
+        }
+      }
+
       // Navigate to a success page with the new booking details
       navigate('/booking-success', { state: { booking: newBooking } });
 
@@ -150,6 +174,17 @@ export default function BookingPage() {
             </form>
           </div>
         </div>
+
+        {/* Seat Selector Section */}
+        {formData.travelDate && (
+          <div className="max-w-4xl mx-auto mt-8">
+            <SeatSelector 
+              vehicleId={Number(vehicleId)}
+              date={formData.travelDate}
+              onSeatsSelected={setSelectedSeats}
+            />
+          </div>
+        )}
       </div>
     </div>
   );

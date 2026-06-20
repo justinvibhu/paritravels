@@ -758,9 +758,19 @@ function RegisterPage({ navigate }: { navigate: (p: Page) => void }) {
     setLoading(true);
     try {
       await register(form.email, form.password, form.name, form.mobile);
-      navigate("home");
-    } catch (err) {
-      alert("Registration failed");
+      alert('Account created successfully! Please sign in with your account.');
+      navigate("login");
+    } catch (err: any) {
+      console.error('Registration error:', err);
+      let msg = '';
+      try {
+        if (err && typeof err === 'object') msg = err.message || err.error_description || JSON.stringify(err);
+        else msg = String(err);
+      } catch (e) {
+        msg = 'Registration failed';
+      }
+      if (!msg) msg = 'Registration failed (no additional details)';
+      alert(`Registration failed: ${msg}`);
     }
     setLoading(false);
   };

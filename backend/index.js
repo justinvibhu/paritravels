@@ -81,39 +81,86 @@ app.get('/api/vehicles/:id', async (req, res, next) => {
   }
 });
 
+const buildVehiclePayloads = (body) => {
+  const { name, vehicleNumber, vehicle_number, type, capacity, pricePerDay, price, status, imageUrl, image_url, category, ac, features, rating, reviews } = body;
+  const vehicleNo = vehicleNumber || vehicle_number;
+  const resolvedImage = imageUrl || image_url;
+  const resolvedPrice = pricePerDay || price;
+  const resolvedStatus = status || 'active';
+  const normalizedCapacity = capacity !== undefined && capacity !== null ? Number(capacity) : null;
+
+  const camelPayload = {
+    name,
+    vehicleNumber: vehicleNo,
+    type,
+    capacity: normalizedCapacity,
+    pricePerDay: resolvedPrice,
+    status: resolvedStatus,
+    imageUrl: resolvedImage,
+    category,
+    ac,
+    features,
+    rating,
+    reviews,
+  };
+
+  const snakePayload = {
+    name,
+    vehicle_number: vehicleNo,
+    type,
+    capacity: normalizedCapacity,
+    price_per_day: resolvedPrice,
+    status: resolvedStatus,
+    image_url: resolvedImage,
+    category,
+    ac,
+    features,
+    rating,
+    reviews,
+  };
+
+  return { camelPayload, snakePayload };
+};
+
+const tryInsertVehicle = async (payloads) => {
+  let lastError;
+  for (const payload of payloads) {
+    const { data, error } = await supabase.from('vehicles').insert([payload]).select();
+    if (!error) return data;
+    lastError = error;
+    if (error.code !== 'PGRST204') break;
+  }
+  throw lastError;
+};
+
+const tryUpdateVehicle = async (id, payloads) => {
+  let lastError;
+  for (const payload of payloads) {
+    const { data, error } = await supabase.from('vehicles').update(payload).eq('id', id).select();
+    if (!error) return data;
+    lastError = error;
+    if (error.code !== 'PGRST204') break;
+  }
+  throw lastError;
+};
+
 // Add a new vehicle
 app.post('/api/vehicles', async (req, res, next) => {
   try {
     console.log('--- Handling POST /api/vehicles ---');
     console.log('Request Body:', req.body);
-    
-    // Extract both old and new field names to be safe
-    const { name, vehicleNumber, vehicle_number, type, capacity, pricePerDay, price, status, imageUrl, category, ac, features, rating, reviews } = req.body;
 
+    const { vehicleNumber, vehicle_number } = req.body;
     const vehicleNo = vehicleNumber || vehicle_number;
     if (!vehicleNo) {
       return res.status(400).json({ error: 'Vehicle number is required.' });
     }
 
-    const { data, error } = await supabase
-      .from('vehicles')
-      .insert([{ 
-        name, 
-        vehicleNumber: vehicleNo,
-        type, 
-        capacity, 
-        pricePerDay: pricePerDay || price, 
-        status: status || 'active', 
-        imageUrl,
-        category,
-        ac,
-        features,
-        rating,
-        reviews
-      }])
-      .select();
+    const { camelPayload, snakePayload } = buildVehiclePayloads(req.body);
+    console.log('Creating vehicle with camelPayload:', camelPayload);
+    console.log('Creating vehicle with snakePayload:', snakePayload);
 
-    if (error) throw error;
+    const data = await tryInsertVehicle([camelPayload, snakePayload]);
 
     if (!data || data.length === 0) {
       throw new Error('Vehicle created but could not be retrieved. Check RLS policies.');
@@ -130,37 +177,17 @@ app.post('/api/vehicles', async (req, res, next) => {
 app.put('/api/vehicles/:id', async (req, res, next) => {
   try {
     const { id } = req.params;
-    
-    // Extract both old and new field names to be safe
-    const { name, vehicleNumber, vehicle_number, type, capacity, pricePerDay, price, status, imageUrl, category, ac, features, rating, reviews } = req.body;
-
+    const { vehicleNumber, vehicle_number } = req.body;
     const vehicleNo = vehicleNumber || vehicle_number;
     if (!vehicleNo) {
       return res.status(400).json({ error: 'Vehicle number is required.' });
     }
 
-    const updatePayload = {
-      name,
-      vehicleNumber: vehicleNo,
-      type,
-      capacity,
-      pricePerDay: pricePerDay || price,
-      status: status || 'active',
-      imageUrl,
-      category,
-      ac,
-      features,
-      rating,
-      reviews,
-    };
+    const { camelPayload, snakePayload } = buildVehiclePayloads(req.body);
+    console.log('Updating vehicle id', id, 'with camelPayload:', camelPayload);
+    console.log('Updating vehicle id', id, 'with snakePayload:', snakePayload);
 
-    const { data, error } = await supabase
-      .from('vehicles')
-      .update(updatePayload)
-      .eq('id', id)
-      .select();
-
-    if (error) throw error;
+    const data = await tryUpdateVehicle(id, [camelPayload, snakePayload]);
 
     if (!data || data.length === 0) {
       return res.status(404).json({ error: 'Vehicle not found' });
@@ -399,6 +426,53 @@ app.delete('/api/drivers/:id', async (req, res, next) => {
 
 // --- BOOKINGS API ---
 
+// Admin: create user (uses Service Role key, bypasses RLS)
+app.post('/api/admin/create-user', async (req, res, next) => {
+  try {
+    const { email, password, fullName, mobile } = req.body;
+    if (!email || !password) return res.status(400).json({ error: 'email and password are required' });
+    // Optional admin secret check to prevent abuse in production
+    const adminSecret = process.env.ADMIN_SECRET;
+    if (adminSecret) {
+      const provided = req.headers['x-admin-secret'] || req.headers['x-admin-secret'.toLowerCase()];
+      if (!provided || provided !== adminSecret) return res.status(403).json({ error: 'Forbidden' });
+    }
+
+    // Create the auth user via the Admin API and auto-confirm the email
+    const { data, error } = await supabase.auth.admin.createUser({
+      email,
+      password,
+      // Try to mark the user as confirmed so they can sign in immediately
+      email_confirm: true,
+      email_confirmed_at: new Date().toISOString(),
+      user_metadata: { full_name: fullName, mobile }
+    });
+    if (error) throw error;
+
+    // Insert profile row into users table (snake_case column names)
+    try {
+      const profileRow = {
+        uid: data.user.id,
+        full_name: fullName,
+        email,
+        mobile,
+        role: 'customer',
+        created_at: new Date().toISOString(),
+      };
+      const { data: profileData, error: profileError } = await supabase.from('users').insert([profileRow]).select('uid, full_name, email, mobile, role, created_at');
+      if (profileError) {
+        console.error('Profile insert error:', profileError);
+      }
+    } catch (e) {
+      console.error('Error inserting profile row:', e.message || e);
+    }
+
+    res.status(201).json({ user: data.user });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // Get all bookings
 app.get('/api/bookings', async (req, res, next) => {
   try {
@@ -492,6 +566,189 @@ app.delete('/api/bookings/:id', async (req, res, next) => {
     const { error } = await query;
 
     if (error) throw error;
+    res.status(204).send();
+  } catch (error) {
+    next(error);
+  }
+});
+
+// --- SEAT BOOKINGS API ---
+
+// Get available seats for a vehicle on a specific date
+app.get('/api/vehicles/:id/seats', async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { date } = req.query; // YYYY-MM-DD format
+
+    if (!date) return res.status(400).json({ error: 'date query parameter required' });
+
+    // Get vehicle capacity
+    const { data: vehicle, error: vehicleError } = await supabase
+      .from('vehicles')
+      .select('capacity')
+      .eq('id', id)
+      .single();
+
+    if (vehicleError) throw vehicleError;
+    if (!vehicle) return res.status(404).json({ error: 'Vehicle not found' });
+
+    // Get booked seats for this vehicle on this date
+    const { data: bookedSeats, error: seatsError } = await supabase
+      .from('seat_bookings')
+      .select('seat_number, seat_label, passenger_name')
+      .eq('vehicle_id', id)
+      .gte('booked_at', date + 'T00:00:00')
+      .lt('booked_at', date + 'T23:59:59');
+
+    if (seatsError) throw seatsError;
+
+    // Generate available seats (1 to capacity)
+    const bookedNumbers = bookedSeats?.map(s => s.seat_number) || [];
+    const availableSeats = [];
+    const bookedSeatsList = [];
+
+    for (let i = 1; i <= vehicle.capacity; i++) {
+      if (bookedNumbers.includes(i)) {
+        bookedSeatsList.push({
+          seatNumber: i,
+          seatLabel: bookedSeats.find(s => s.seat_number === i)?.seat_label || String(i),
+          passengerName: bookedSeats.find(s => s.seat_number === i)?.passenger_name || 'N/A',
+          status: 'booked'
+        });
+      } else {
+        availableSeats.push({
+          seatNumber: i,
+          seatLabel: String(i),
+          status: 'available'
+        });
+      }
+    }
+
+    res.json({
+      vehicleId: id,
+      capacity: vehicle.capacity,
+      date,
+      availableSeats,
+      bookedSeats: bookedSeatsList,
+      totalAvailable: availableSeats.length,
+      totalBooked: bookedSeatsList.length
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Book seats for a customer (called after booking is created)
+app.post('/api/seat-bookings', async (req, res, next) => {
+  try {
+    const { vehicleId, bookingId, seatNumbers, passengerName } = req.body;
+
+    if (!vehicleId || !bookingId || !seatNumbers || !Array.isArray(seatNumbers)) {
+      return res.status(400).json({ error: 'vehicleId, bookingId, and seatNumbers array are required' });
+    }
+
+    // Support seat identifiers as numbers or labels (e.g., 'C4'). Convert labels to numeric seat_number using 4 columns per row.
+    const seatsPerRow = 4;
+    const seatBookings = seatNumbers.map((s) => {
+      let seat_number = null;
+      let seat_label = null;
+
+      if (typeof s === 'number') {
+        seat_number = s;
+        seat_label = String(s);
+      } else if (typeof s === 'string') {
+        seat_label = s;
+        // Parse label like 'C4' -> row 'C' and column 4
+        const match = s.match(/^([A-Za-z])(\d+)$/);
+        if (match) {
+          const rowLetter = match[1].toUpperCase();
+          const colNum = Number(match[2]);
+          const rowIndex = rowLetter.charCodeAt(0) - 65; // A -> 0
+          seat_number = rowIndex * seatsPerRow + colNum;
+        } else {
+          // fallback: try to parse numeric part
+          const n = parseInt(s, 10);
+          if (!isNaN(n)) {
+            seat_number = n;
+          }
+        }
+      }
+
+      return {
+        vehicle_id: vehicleId,
+        booking_id: bookingId,
+        seat_number: seat_number,
+        seat_label: seat_label || String(seat_number || ''),
+        passenger_name: passengerName || 'N/A'
+      };
+    });
+
+    const { data, error } = await supabase
+      .from('seat_bookings')
+      .insert(seatBookings)
+      .select();
+
+    if (error) throw error;
+
+    res.status(201).json(keysToCamel(data));
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Admin: Get all booked seats for a vehicle (with booking details)
+app.get('/api/admin/vehicles/:id/seats', async (req, res, next) => {
+  try {
+    const { id } = req.params;
+
+    // Get vehicle info
+    const { data: vehicle, error: vehicleError } = await supabase
+      .from('vehicles')
+      .select('id, name, capacity')
+      .eq('id', id)
+      .single();
+
+    if (vehicleError) throw vehicleError;
+    if (!vehicle) return res.status(404).json({ error: 'Vehicle not found' });
+
+    // Get all seat bookings with booking details
+    // Select the related bookings row with all columns to avoid missing-column errors
+    const { data: seatBookings, error: seatsError } = await supabase
+      .from('seat_bookings')
+      .select(`
+        id,
+        seat_number,
+        seat_label,
+        passenger_name,
+        booked_at,
+        bookings(*)
+      `)
+      .eq('vehicle_id', id)
+      .order('seat_number', { ascending: true });
+
+    if (seatsError) throw seatsError;
+
+    res.json({
+      vehicle: keysToCamel(vehicle),
+      seatBookings: keysToCamel(seatBookings || [])
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Admin: Delete a seat booking (free up a seat)
+app.delete('/api/seat-bookings/:id', async (req, res, next) => {
+  try {
+    const { id } = req.params;
+
+    const { error } = await supabase
+      .from('seat_bookings')
+      .delete()
+      .eq('id', id);
+
+    if (error) throw error;
+
     res.status(204).send();
   } catch (error) {
     next(error);

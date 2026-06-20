@@ -10,7 +10,7 @@ const navItems = [
   { name: "Drivers", path: "/admin/drivers" },
   { name: "Tours", path: "/admin/tours" },
   { name: "Vehicles", path: "/admin/vehicles" },
-  // Add other items like Vehicles, Reports etc. here
+  { name: "Seat Management", path: "/admin/seats" },
 ];
 
 export default function AdminLayout() {

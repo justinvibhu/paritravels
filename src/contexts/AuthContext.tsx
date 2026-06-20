@@ -61,10 +61,36 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const fetchUserData = async (userId: string) => {
-    const { data, error } = await supabase.from('users').select('*').eq('uid', userId).single();
-    if (!error && data) {
-      setUserData(data as UserProfile);
-    } else {
+    try {
+      const { data, error } = await supabase
+        .from('users')
+        .select('uid, full_name, email, mobile, role, created_at')
+        .eq('uid', userId)
+        .single();
+      if (error) {
+        console.error('fetchUserData supabase error:', error);
+        setUserData(null);
+        setLoading(false);
+        return;
+      }
+      if (!data) {
+        setUserData(null);
+        setLoading(false);
+        return;
+      }
+
+      const profile: UserProfile = {
+        uid: data.uid,
+        fullName: data.full_name || '',
+        email: data.email,
+        mobile: data.mobile,
+        role: data.role,
+        profileImage: (data as any).profile_image || undefined,
+        createdAt: data.created_at,
+      };
+      setUserData(profile);
+    } catch (err) {
+      console.error('fetchUserData unexpected error:', err);
       setUserData(null);
     }
     setLoading(false);
@@ -87,28 +113,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const register = async (email: string, pass: string, name: string, mobile: string) => {
-    const { data, error } = await supabase.auth.signUp({ 
-      email, 
-      password: pass,
-      options: {
-        data: {
-          full_name: name,
-        }
-      }
+    // Use backend admin endpoint to create user (service role). This avoids RLS issues.
+    const API_URL = import.meta.env.VITE_API_URL || '/api';
+    const resp = await fetch(`${API_URL}/admin/create-user`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password: pass, fullName: name, mobile })
     });
-    if (error) throw error;
-
-    if (data.user) {
-      const newUser: UserProfile = {
-        uid: data.user.id,
-        fullName: name,
-        email,
-        mobile,
-        role: "customer",
-        createdAt: new Date().toISOString(),
-      };
-      await supabase.from('users').insert([newUser]);
+    if (!resp.ok) {
+      const text = await resp.text();
+      throw new Error(text || 'Failed to create user via admin API');
     }
+    // Account created successfully. User will sign in next.
   };
 
   const loginWithGoogle = async () => {
