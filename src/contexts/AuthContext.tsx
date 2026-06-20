@@ -16,7 +16,7 @@ interface AuthContextType {
   currentUser: User | null;
   userData: UserProfile | null;
   loading: boolean;
-  login: (email: string, pass: string) => Promise<void>;
+  login: (email: string, pass: string) => Promise<UserProfile | null>;
   register: (email: string, pass: string, name: string, mobile: string) => Promise<void>;
   loginWithGoogle: () => Promise<void>;
   logout: () => Promise<void>;
@@ -73,6 +73,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const login = async (email: string, pass: string) => {
     const { error } = await supabase.auth.signInWithPassword({ email, password: pass });
     if (error) throw error;
+    
+    const session = await supabase.auth.getSession();
+    const userId = session.data.session?.user.id;
+    if (!userId) return null;
+    
+    const { data, error: userError } = await supabase.from('users').select('*').eq('uid', userId).single();
+    if (!userError && data) {
+      setUserData(data as UserProfile);
+      return data as UserProfile;
+    }
+    return null;
   };
 
   const register = async (email: string, pass: string, name: string, mobile: string) => {

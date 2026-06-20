@@ -677,8 +677,12 @@ function LoginPage({ navigate }: { navigate: (p: Page) => void }) {
   const handleLogin = async () => {
     setLoading(true);
     try {
-      await login(form.email, form.password);
-      navigate("home");
+      const userProfile = await login(form.email, form.password);
+      if (userProfile?.role === "admin") {
+        navigate("admin");
+      } else {
+        navigate("home");
+      }
     } catch (error: any) {
       alert(`Login failed: ${error.message || "Check your credentials."}`);
     }
