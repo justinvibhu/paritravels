@@ -14,12 +14,13 @@ import {
   Tooltip, ResponsiveContainer, PieChart, Pie, Cell
 } from "recharts";
 import { useAuth } from "../contexts/AuthContext.tsx";
-import { createBooking, getUserBookings, getVehicles, getTours } from "../supabase/db";
+import { createBooking, getUserBookings, getVehicles, getTours, getSponsors } from "../supabase/db";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type Page = "home" | "login" | "register" | "forgot" | "vehicles" | "booking" | "tours" | "dashboard" | "admin";
 type Seat = { id: string; label: string; type: "driver" | "seat" | "aisle" | "empty"; booked?: boolean };
-type VehicleItem = { id: string | number; name: string; type: string; capacity: number; price: number; ac: boolean; img: string; features: string[]; rating: number; reviews: number; category: string; imageUrl?: string };
+type VehicleItem = { id: string | number; name: string; type: string; capacity: number; price: number; ac: boolean; img: string; features: string[]; rating: number; reviews: number; category: string; imageUrl?: string; vehicleNumber?: string };
+type SearchFilters = { from?: string; to?: string; date?: string; returnDate?: string; passengers?: number; vehicleType?: string };
 type DriverItem = { id: string; name: string; phone?: string; licenseNumber?: string; experienceYears?: number; status?: string; imageUrl?: string };
 
 const formatCurrency = (value: number) =>
@@ -44,46 +45,6 @@ const faqsData = [
   { q: "Is there a loyalty points program?", a: "Yes! Every booking earns you Pari Points. 100 points = ₹100 discount on your next booking. Premium members earn 2x points on all bookings." },
   { q: "Do you provide airport transfers?", a: "Absolutely! We offer 24/7 airport transfer services with real-time flight tracking. Book at least 2 hours before your flight for guaranteed availability." },
 ];
-
-// ─── Seat Layout Generator ─────────────────────────────────────────────────────
-function getSeatLayout(category: string): Seat[][] {
-  const s = (id: string, label: string, booked = false): Seat => ({ id, label, type: "seat", booked });
-  const driver: Seat = { id: "driver", label: "Driver", type: "driver" };
-
-  if (category === "sedan") {
-    return [
-      [driver, s("A1", "A1")],
-      [s("B1", "B1"), s("B2", "B2", true)],
-    ];
-  }
-  if (category === "suv") {
-    return [
-      [driver, s("A1", "A1")],
-      [s("B1", "B1", true), s("B2", "B2")],
-      [s("C1", "C1"), s("C2", "C2", true)],
-      [s("D1", "D1"), s("D2", "D2")],
-    ];
-  }
-  if (category === "tempo") {
-    return [
-      [driver, s("A1", "A1"), s("A2", "A2", true), s("A3", "A3")],
-      [s("B1", "B1"), s("B2", "B2"), s("B3", "B3", true), s("B4", "B4")],
-      [s("C1", "C1", true), s("C2", "C2"), s("C3", "C3"), s("C4", "C4")],
-      [s("D1", "D1"), s("D2", "D2", true), s("D3", "D3"), s("D4", "D4")],
-    ];
-  }
-  // bus
-  return [
-    [driver, { id: "e1", label: "", type: "empty" }, { id: "e2", label: "", type: "empty" }, { id: "e3", label: "", type: "empty" }, { id: "e4", label: "", type: "empty" }],
-    [s("A1", "A1"), s("A2", "A2"), { id: "ai1", label: "", type: "aisle" }, s("A3", "A3", true), s("A4", "A4")],
-    [s("B1", "B1", true), s("B2", "B2"), { id: "ai2", label: "", type: "aisle" }, s("B3", "B3"), s("B4", "B4", true)],
-    [s("C1", "C1"), s("C2", "C2"), { id: "ai3", label: "", type: "aisle" }, s("C3", "C3"), s("C4", "C4")],
-    [s("D1", "D1"), s("D2", "D2", true), { id: "ai4", label: "", type: "aisle" }, s("D3", "D3"), s("D4", "D4")],
-    [s("E1", "E1"), s("E2", "E2"), { id: "ai5", label: "", type: "aisle" }, s("E3", "E3", true), s("E4", "E4")],
-    [s("F1", "F1", true), s("F2", "F2"), { id: "ai6", label: "", type: "aisle" }, s("F3", "F3"), s("F4", "F4")],
-    [s("G1", "G1"), s("G2", "G2"), { id: "ai7", label: "", type: "aisle" }, s("G3", "G3"), s("G4", "G4", true)],
-  ];
-}
 
 // ─── Shared Components ─────────────────────────────────────────────────────────
 function Stars({ rating }: { rating: number }) {
@@ -115,7 +76,7 @@ function StatusBadge({ status }: { status: string }) {
   return <Badge text={status} />;
 }
 
-function SeatMap({ layout, selected, onToggle }: { layout: Seat[][], selected: string[], onToggle: (id: string) => void }) {
+function SeatMap({ layout, selected, onToggle, booked }: { layout: Seat[][], selected: string[], onToggle: (id: string) => void, booked: Set<string> }) {
   return (
     <div className="bg-gradient-to-b from-blue-50 to-white rounded-2xl p-6 border border-blue-100">
       <div className="flex items-center gap-6 mb-5 text-sm flex-wrap gap-y-2">
@@ -134,7 +95,7 @@ function SeatMap({ layout, selected, onToggle }: { layout: Seat[][], selected: s
                 );
                 if (seat.type === "aisle") return <div key={seat.id} className="w-10 h-10" />;
                 if (seat.type === "empty") return <div key={seat.id} className="w-10 h-10 opacity-0" />;
-                const isBooked = seat.booked;
+                const isBooked = seat.booked || booked.has(seat.id);
                 const isSelected = selected.includes(seat.id);
                 return (
                   <button
@@ -258,13 +219,14 @@ function Navbar({ page, navigate, dark, setDark }: { page: Page; navigate: (p: P
 }
 
 // ─── Home Page ────────────────────────────────────────────────────────────────
-function HomePage({ navigate }: { navigate: (p: Page) => void }) {
+function HomePage({ navigate }: { navigate: (p: Page, params?: SearchFilters) => void }) {
   const { userData } = useAuth();
   const [openFaq, setOpenFaq] = useState<number | null>(null);
   const [searchForm, setSearchForm] = useState({ from: "", to: "", date: "", returnDate: "", passengers: 1, vehicleType: "suv" });
   const [passengers, setPassengers] = useState(1);
   const [featuredVehicles, setFeaturedVehicles] = useState<VehicleItem[]>([]);
   const [featuredTours, setFeaturedTours] = useState<any[]>([]);
+  const [sponsors, setSponsors] = useState<any[]>([]);
 
   useEffect(() => {
     const loadData = async () => {
@@ -295,12 +257,34 @@ function HomePage({ navigate }: { navigate: (p: Page) => void }) {
             includes: t.includes || ["Vehicle", "Hotel"]
           })));
         }
+
+        try {
+          const sponsorData = await getSponsors(true);
+          if (sponsorData && sponsorData.length > 0) {
+            setSponsors(sponsorData.slice(0, 6));
+          }
+        } catch (e) {
+          console.error("Failed to load sponsors:", e);
+        }
       } catch (e) {
         console.error("Failed to load featured data:", e);
       }
     };
     loadData();
   }, []);
+
+  const citySuggestions = [
+    "Mumbai",
+    "Pune",
+    "Goa",
+    "Delhi",
+    "Bangalore",
+    "Chennai",
+    "Hyderabad",
+    "Jaipur",
+    "Ahmedabad",
+    "Kolkata",
+  ];
 
   const services = [
     { icon: Car, title: "Vehicle Rental", desc: "Premium fleet of cars, SUVs & buses for any journey", color: "from-blue-500 to-blue-600" },
@@ -343,7 +327,12 @@ function HomePage({ navigate }: { navigate: (p: Page) => void }) {
                 <div className="flex-1 min-w-0">
                   <div className="text-white/60 text-xs mb-0.5">Pickup Location</div>
                   <input value={searchForm.from} onChange={e => setSearchForm({ ...searchForm, from: e.target.value })}
-                    placeholder="Enter city..." className="bg-transparent text-white placeholder-white/40 text-sm w-full outline-none font-medium" />
+                    placeholder="Enter city..." list="city-suggestions" className="bg-transparent text-white placeholder-white/40 text-sm w-full outline-none font-medium" />
+                  <datalist id="city-suggestions">
+                    {citySuggestions.map((city) => (
+                      <option key={city} value={city} />
+                    ))}
+                  </datalist>
                 </div>
               </div>
               <div className="bg-white/10 rounded-xl px-4 py-3 flex items-center gap-3 col-span-2 md:col-span-1">
@@ -351,7 +340,7 @@ function HomePage({ navigate }: { navigate: (p: Page) => void }) {
                 <div className="flex-1 min-w-0">
                   <div className="text-white/60 text-xs mb-0.5">Destination</div>
                   <input value={searchForm.to} onChange={e => setSearchForm({ ...searchForm, to: e.target.value })}
-                    placeholder="Going to..." className="bg-transparent text-white placeholder-white/40 text-sm w-full outline-none font-medium" />
+                    placeholder="Going to..." list="city-suggestions" className="bg-transparent text-white placeholder-white/40 text-sm w-full outline-none font-medium" />
                 </div>
               </div>
               <div className="bg-white/10 rounded-xl px-4 py-3 flex items-center gap-3">
@@ -399,8 +388,9 @@ function HomePage({ navigate }: { navigate: (p: Page) => void }) {
                 </div>
               </div>
             </div>
-            <button onClick={() => navigate("vehicles")}
-              className="w-full bg-gradient-to-r from-sky-400 to-blue-600 text-white font-bold py-3.5 rounded-xl flex items-center justify-center gap-2 hover:opacity-90 transition-all shadow-xl shadow-blue-900/30 text-base">
+            <button onClick={() => navigate("booking", { from: searchForm.from.trim(), to: searchForm.to.trim(), date: searchForm.date })}
+              disabled={!searchForm.from.trim() || !searchForm.to.trim()}
+              className="w-full disabled:cursor-not-allowed disabled:bg-slate-500 bg-gradient-to-r from-sky-400 to-blue-600 text-white font-bold py-3.5 rounded-xl flex items-center justify-center gap-2 hover:opacity-90 transition-all shadow-xl shadow-blue-900/30 text-base">
               <Search size={18} /> Search Available Vehicles
             </button>
             <div className="mt-4 text-center">
@@ -420,6 +410,33 @@ function HomePage({ navigate }: { navigate: (p: Page) => void }) {
           </div>
         </div>
       </section>
+
+      {sponsors.length > 0 && (
+        <section className="py-20 bg-slate-950 text-white">
+          <div className="max-w-7xl mx-auto px-4">
+            <div className="mb-12 text-center">
+              <p className="text-sm uppercase tracking-[0.35em] text-sky-300">Sponsored By</p>
+              <h2 className="text-3xl md:text-4xl font-bold mt-3">Trusted Brand Partners</h2>
+            </div>
+            <div className="grid gap-6 md:grid-cols-3">
+              {sponsors.map((sponsor) => (
+                <a key={sponsor.id} href={sponsor.link || "#"} target="_blank" rel="noreferrer" className="group block overflow-hidden rounded-3xl border border-white/10 bg-white/5 p-6 transition hover:-translate-y-1 hover:border-sky-300/40 hover:bg-white/10">
+                  <div className="flex items-center justify-center rounded-3xl bg-slate-900 p-6 mb-5 min-h-[180px]">
+                    <img src={sponsor.imageUrl || "https://images.unsplash.com/photo-1512436991641-6745cdb1723f?w=800&h=600&fit=crop&auto=format"} alt={sponsor.title} className="max-h-40 object-contain" />
+                  </div>
+                  <div>
+                    <h3 className="text-xl font-semibold text-white mb-2">{sponsor.title}</h3>
+                    <p className="text-sm text-slate-300 leading-relaxed mb-4">{sponsor.description || "Exclusive offers available now."}</p>
+                    <span className="inline-flex items-center gap-2 text-sky-300 font-semibold">
+                      View Offer <ArrowRight size={16} />
+                    </span>
+                  </div>
+                </a>
+              ))}
+            </div>
+          </div>
+        </section>
+      )}
 
       {/* Services Section */}
       <section className="py-20 bg-white">
@@ -636,7 +653,7 @@ function HomePage({ navigate }: { navigate: (p: Page) => void }) {
             {[
               { title: "Quick Links", links: ["Home", "Vehicles", "Tours", "Blog", "Careers", "About Us"] },
               { title: "Services", links: ["Vehicle Rental", "Tour Packages", "Wedding Transport", "Commercial Transport", "Goods Transport", "Airport Transfer"] },
-              { title: "Contact", links: ["+91 98765 43210", "info@paritravels.in", "Pune, Maharashtra", "Mon-Sat: 9AM-9PM"] },
+              { title: "Contact", links: ["+91 86260 48673", "info@paritravels.in", "Pune, Maharashtra", "Mon-Sat: 9AM-9PM"] },
             ].map((col) => (
               <div key={col.title}>
                 <h4 className="text-white font-bold mb-4">{col.title}</h4>
@@ -660,7 +677,7 @@ function HomePage({ navigate }: { navigate: (p: Page) => void }) {
       </footer>
 
       {/* WhatsApp Floating Button */}
-      <a href="https://wa.me/919876543210" target="_blank" rel="noreferrer"
+      <a href="https://wa.me/918626048673" target="_blank" rel="noreferrer"
         className="fixed bottom-6 right-6 w-14 h-14 bg-green-500 hover:bg-green-600 rounded-full flex items-center justify-center shadow-xl shadow-green-500/30 z-50 transition-all hover:scale-110">
         <MessageCircle size={24} className="text-white" />
       </a>
@@ -1017,14 +1034,18 @@ function VehiclesPage({ navigate }: { navigate: (p: Page) => void }) {
 }
 
 // ─── Booking Flow ─────────────────────────────────────────────────────────────
-function BookingFlowPage({ navigate }: { navigate: (p: Page) => void }) {
+function BookingFlowPage({ navigate, initialFrom, initialTo, initialDate }: { navigate: (p: Page, params?: SearchFilters) => void; initialFrom?: string; initialTo?: string; initialDate?: string }) {
   const { currentUser } = useAuth();
   const [step, setStep] = useState(1);
-  const [from, setFrom] = useState("Pune");
-  const [to, setTo] = useState("Goa");
-  const [date, setDate] = useState("2025-06-20");
+  const [from, setFrom] = useState(initialFrom || "Pune");
+  const [to, setTo] = useState(initialTo || "Goa");
+  const [date, setDate] = useState(initialDate || "2025-06-20");
   const [selectedVehicle, setSelectedVehicle] = useState<VehicleItem | null>(null);
   const [selectedSeats, setSelectedSeats] = useState<string[]>([]);
+  const [bookedSeatLabels, setBookedSeatLabels] = useState<Set<string>>(new Set());
+  const [seatLayout, setSeatLayout] = useState<Seat[][]>([]);
+  const [seatLoading, setSeatLoading] = useState(false);
+  const [seatError, setSeatError] = useState<string | null>(null);
   const [passengers, setPassengers] = useState([{ name: "Priya Sharma", age: "28", gender: "female" }]);
   const [payTab, setPayTab] = useState<"upi" | "card" | "netbanking">("upi");
   const [upiId, setUpiId] = useState("");
@@ -1036,7 +1057,8 @@ function BookingFlowPage({ navigate }: { navigate: (p: Page) => void }) {
   useEffect(() => {
     const fetchVehicles = async () => {
       try {
-        const vData = await getVehicles();
+        const filters = { status: 'active', ...(from && to ? { origin: from, destination: to } : {}) };
+        const vData = await getVehicles(filters);
         if (vData && vData.length > 0) {
           setAvailableVehicles(vData.map((v: any) => ({
             id: v.id,
@@ -1052,21 +1074,82 @@ function BookingFlowPage({ navigate }: { navigate: (p: Page) => void }) {
             reviews: v.reviews || 0,
             category: v.category || v.type?.toLowerCase() || "suv",
           })));
+        } else {
+          setAvailableVehicles([]);
         }
       } catch (e) {
         console.error("Using fallback vehicle data");
       }
     };
     fetchVehicles();
-  }, []);
+  }, [from, to]);
 
   const bookingId = bookingSavedId || "PT" + Date.now().toString().slice(-8);
 
+  const getSeatLabelFromNumber = (number: number) => {
+    const row = Math.floor((number - 1) / 4);
+    const col = ((number - 1) % 4) + 1;
+    return `${String.fromCharCode(65 + row)}${col}`;
+  };
+
   const toggleSeat = (id: string) => {
+    if (bookedSeatLabels.has(id)) return;
     setSelectedSeats(prev => prev.includes(id) ? prev.filter(s => s !== id) : [...prev, id]);
   };
 
-  const vehLayout = selectedVehicle ? getSeatLayout(selectedVehicle.category) : getSeatLayout("suv");
+  useEffect(() => {
+    const fetchBookedSeats = async () => {
+      if (!selectedVehicle || !date) {
+        setBookedSeatLabels(new Set());
+        setSeatError(null);
+        return;
+      }
+
+      setSeatLoading(true);
+      setSeatError(null);
+      try {
+        const API_URL = import.meta.env.VITE_API_URL || "/api";
+        const response = await fetch(`${API_URL}/vehicles/${selectedVehicle.id}/seats?date=${date}`);
+        if (!response.ok) {
+          const body = await response.text().catch(() => "");
+          throw new Error(`Failed to load seat availability (${response.status})${body ? `: ${body}` : ""}`);
+        }
+
+        const data = await response.json();
+        setSeatLayout(data.layout || []);
+        const labels = new Set<string>();
+
+        if (Array.isArray(data.bookedSeats)) {
+          data.bookedSeats.forEach((seat: any) => {
+            const rawLabel = seat.seatLabel || seat.seat_label || "";
+            const normalized = String(rawLabel).trim().toUpperCase();
+            if (normalized) {
+              labels.add(normalized);
+            } else if (typeof seat.seatNumber === "number") {
+              labels.add(getSeatLabelFromNumber(seat.seatNumber));
+            }
+          });
+        }
+
+        setBookedSeatLabels(labels);
+      } catch (error) {
+        setSeatError(error instanceof Error ? error.message : String(error));
+        setBookedSeatLabels(new Set());
+      } finally {
+        setSeatLoading(false);
+      }
+    };
+
+    fetchBookedSeats();
+  }, [selectedVehicle, date]);
+
+  useEffect(() => {
+    if (!selectedSeats.length || !bookedSeatLabels.size) return;
+    const filtered = selectedSeats.filter((seat) => !bookedSeatLabels.has(seat));
+    if (filtered.length !== selectedSeats.length) {
+      setSelectedSeats(filtered);
+    }
+  }, [bookedSeatLabels, selectedSeats]);
 
   const totalFare = selectedVehicle ? selectedVehicle.price + selectedSeats.length * 200 : 0;
 
@@ -1084,6 +1167,29 @@ function BookingFlowPage({ navigate }: { navigate: (p: Page) => void }) {
 
     setIsCreating(true);
     try {
+      const API_URL = import.meta.env.VITE_API_URL || "/api";
+      
+      // Validate seats are still available (race condition prevention)
+      const validationResponse = await fetch(`${API_URL}/validate-seats`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          vehicleId: selectedVehicle.id,
+          seatLabels: selectedSeats,
+          date: date,
+        }),
+      });
+
+      if (!validationResponse.ok) {
+        const validationError = await validationResponse.json();
+        alert(`Cannot complete booking: ${validationError.message || 'Seats no longer available'}`);
+        // Refresh seat availability
+        fetchBookedSeats();
+        setIsCreating(false);
+        return;
+      }
+
+      // First, create the booking
       const savedBookingId = await createBooking({
         userId: currentUser.id,
         userEmail: currentUser.email,
@@ -1104,6 +1210,38 @@ function BookingFlowPage({ navigate }: { navigate: (p: Page) => void }) {
         paymentStatus: "Pending",
         bookingStatus: "Confirmed",
       });
+
+      // Then, book the seats with gender information
+      if (selectedSeats.length > 0) {
+        const seatBookingPayload = {
+          vehicleId: selectedVehicle.id,
+          bookingId: savedBookingId,
+          seatNumbers: selectedSeats,
+          passengers: passengers.map((p, idx) => ({
+            name: p.name,
+            seat: selectedSeats[idx],
+            seatLabel: selectedSeats[idx],
+            gender: (p.gender || 'not_specified').toLowerCase(),
+          })),
+          passengerName: passengers[0]?.name || "Guest",
+          travelDate: date,
+          vehicleName: selectedVehicle.name,
+          origin: from,
+          destination: to,
+        };
+
+        const seatResponse = await fetch(`${API_URL}/seat-bookings`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(seatBookingPayload),
+        });
+
+        if (!seatResponse.ok) {
+          const errData = await seatResponse.json();
+          console.warn("Failed to book seats:", errData.error || seatResponse.statusText);
+        }
+      }
+
       setBookingSavedId(savedBookingId);
       setStep(6);
     } catch (error) {
@@ -1178,7 +1316,12 @@ function BookingFlowPage({ navigate }: { navigate: (p: Page) => void }) {
               <span className="text-sm text-gray-500 bg-blue-50 px-3 py-1 rounded-full">{from} → {to} · {date}</span>
             </div>
             <div className="grid md:grid-cols-2 gap-4">
-          {availableVehicles.map((v) => (
+              {availableVehicles.length === 0 ? (
+                <div className="col-span-full rounded-2xl border border-dashed border-blue-200 bg-blue-50 p-10 text-center text-blue-700">
+                  <h3 className="text-lg font-semibold mb-2">No vehicles available on this route</h3>
+                  <p className="text-sm text-blue-600">We couldn’t find any vehicles for {from} → {to} on {date}. Please try a different route, date, or vehicle type.</p>
+                </div>
+              ) : availableVehicles.map((v) => (
                 <button key={v.id} onClick={() => setSelectedVehicle(v)}
                   className={`text-left rounded-2xl overflow-hidden border-2 transition-all hover:shadow-md ${selectedVehicle?.id === v.id ? "border-blue-600 shadow-md" : "border-gray-100"}`}>
                   <div className="h-36 bg-blue-50">
@@ -1223,7 +1366,25 @@ function BookingFlowPage({ navigate }: { navigate: (p: Page) => void }) {
             </div>
             <div className="grid lg:grid-cols-5 gap-8">
               <div className="lg:col-span-3">
-                <SeatMap layout={vehLayout} selected={selectedSeats} onToggle={toggleSeat} />
+                <div className="mb-4 flex flex-wrap items-center gap-3 text-sm text-gray-600">
+                  <span className="inline-flex items-center gap-2 rounded-full border border-gray-200 bg-white px-3 py-2">
+                    <span className="w-2.5 h-2.5 rounded-full bg-green-300" /> Available
+                  </span>
+                  <span className="inline-flex items-center gap-2 rounded-full border border-gray-200 bg-blue-50 px-3 py-2">
+                    <span className="w-2.5 h-2.5 rounded-full bg-blue-600" /> Selected
+                  </span>
+                  <span className="inline-flex items-center gap-2 rounded-full border border-gray-200 bg-gray-100 px-3 py-2">
+                    <span className="w-2.5 h-2.5 rounded-full bg-gray-400" /> Unavailable
+                  </span>
+                  <span className="inline-flex items-center gap-2 rounded-full border border-gray-200 bg-white px-3 py-2">
+                    <span className="w-2.5 h-2.5 rounded-full bg-blue-900" /> Driver
+                  </span>
+                  <span className="ml-auto text-xs text-gray-500">
+                    {seatLoading ? 'Loading latest availability…' : `${bookedSeatLabels.size} seat${bookedSeatLabels.size === 1 ? '' : 's'} unavailable`}
+                  </span>
+                </div>
+                {seatError && <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{seatError}</div>}
+                <SeatMap layout={seatLayout} selected={selectedSeats} onToggle={toggleSeat} booked={bookedSeatLabels} />
               </div>
               <div className="lg:col-span-2 space-y-4">
                 <div className="bg-blue-50 rounded-2xl p-4">
@@ -1835,10 +1996,15 @@ export default function App() {
   const [page, setPage] = useState<Page>("home");
   const [dark, setDark] = useState(false);
 
-  const navigate = (p: Page) => {
+  const [searchFilters, setSearchFilters] = useState<SearchFilters>({ from: "Pune", to: "Goa", date: "2025-06-20" });
+
+  const navigate = (p: Page, params?: SearchFilters) => {
     if (p === "admin") {
       window.location.href = "/admin";
       return;
+    }
+    if (params) {
+      setSearchFilters((prev) => ({ ...prev, ...params }));
     }
     setPage(p);
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -1856,7 +2022,7 @@ export default function App() {
         {page === "register" && <RegisterPage navigate={navigate} />}
         {page === "forgot" && <ForgotPage navigate={navigate} />}
         {page === "vehicles" && <VehiclesPage navigate={navigate} />}
-        {page === "booking" && <BookingFlowPage navigate={navigate} />}
+        {page === "booking" && <BookingFlowPage navigate={navigate} initialFrom={searchFilters.from} initialTo={searchFilters.to} initialDate={searchFilters.date} />}
         {page === "tours" && <ToursPage navigate={navigate} />}
         {page === "dashboard" && <CustomerDashboard navigate={navigate} />}
       </div>

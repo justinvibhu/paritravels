@@ -18,6 +18,8 @@ export default function VehiclesManagement() {
     category: "suv",
     capacity: 4,
     price: "",
+    origin: "",
+    destination: "",
     ac: true,
     status: "active",
     imageUrl: "",
@@ -66,6 +68,8 @@ export default function VehiclesManagement() {
       category: vehicle.category || "suv",
       capacity: vehicle.capacity || 4,
       price: vehicle.price || vehicle.pricePerDay || "",
+      origin: vehicle.origin || "",
+      destination: vehicle.destination || "",
       ac: vehicle.ac !== undefined ? vehicle.ac : true,
       status: vehicle.status || "active",
       imageUrl: vehicle.imageUrl || vehicle.image_url,
@@ -96,6 +100,8 @@ export default function VehiclesManagement() {
         ...formData,
         price: Number(formData.price),
         capacity: Number(formData.capacity),
+        origin: formData.origin,
+        destination: formData.destination,
       };
 
       if (editingId) {
@@ -136,6 +142,8 @@ export default function VehiclesManagement() {
             <div><label className="block text-sm font-medium text-gray-700 mb-1">Category</label><select name="category" value={formData.category} onChange={handleInputChange} className="w-full border border-gray-300 rounded-md p-2 bg-white"><option value="sedan">Sedan</option><option value="suv">SUV</option><option value="tempo">Tempo Traveller</option><option value="bus">Bus</option></select></div>
             <div><label className="block text-sm font-medium text-gray-700 mb-1">Capacity (Seats)</label><input type="number" name="capacity" value={formData.capacity} onChange={handleInputChange} required min="1" className="w-full border border-gray-300 rounded-md p-2" /></div>
             <div><label className="block text-sm font-medium text-gray-700 mb-1">Price Per Day (₹)</label><input type="number" name="price" value={formData.price} onChange={handleInputChange} required min="0" className="w-full border border-gray-300 rounded-md p-2" /></div>
+            <div><label className="block text-sm font-medium text-gray-700 mb-1">Origin</label><input type="text" name="origin" value={formData.origin} onChange={handleInputChange} className="w-full border border-gray-300 rounded-md p-2" placeholder="e.g., Mumbai" /></div>
+            <div><label className="block text-sm font-medium text-gray-700 mb-1">Destination</label><input type="text" name="destination" value={formData.destination} onChange={handleInputChange} className="w-full border border-gray-300 rounded-md p-2" placeholder="e.g., Pune" /></div>
             <div><label className="block text-sm font-medium text-gray-700 mb-1">Status</label><select name="status" value={formData.status} onChange={handleInputChange} className="w-full border border-gray-300 rounded-md p-2 bg-white"><option value="active">Active</option><option value="inactive">Inactive</option><option value="maintenance">Maintenance</option></select></div>
             <div className="md:col-span-2"><label className="block text-sm font-medium text-gray-700 mb-1">Vehicle Image</label><input type="file" accept="image/*" onChange={(e) => setImageFile(e.target.files[0])} className="w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100" />{editingId && formData.imageUrl && !imageFile && <p className="text-xs text-gray-500 mt-1">Leave empty to keep current image.</p>}</div>
             <div className="md:col-span-2 flex items-center mt-2"><input type="checkbox" name="ac" checked={formData.ac} onChange={handleInputChange} id="vehicle-ac" className="h-4 w-4 text-blue-600 border-gray-300 rounded" /><label htmlFor="vehicle-ac" className="ml-2 block text-sm text-gray-900">Air Conditioned (AC)</label></div>
@@ -152,6 +160,7 @@ export default function VehiclesManagement() {
           <thead className="bg-gray-50">
             <tr>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Vehicle</th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Route</th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Category</th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Price/Day</th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
@@ -168,6 +177,7 @@ export default function VehiclesManagement() {
                     <div className="text-sm text-gray-500">{v.type} • {v.capacity} Seats {v.ac ? "• AC" : ""}</div>
                   </div>
                 </td>
+                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{v.origin ? `${v.origin} → ${v.destination || 'Unknown'}` : 'Route not set'}</td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 capitalize">{v.category}</td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 font-semibold">₹{v.price || v.pricePerDay || 0}</td>
                 <td className="px-6 py-4 whitespace-nowrap">

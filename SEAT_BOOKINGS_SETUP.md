@@ -14,6 +14,7 @@ CREATE TABLE seat_bookings (
   seat_number INT NOT NULL,
   seat_label VARCHAR(10) NOT NULL, -- e.g., "1", "2", "A1", "B2"
   passenger_name VARCHAR(255),
+  gender VARCHAR(20) DEFAULT 'not_specified', -- 'male', 'female', 'not_specified'
   booked_at TIMESTAMP DEFAULT NOW(),
   created_at TIMESTAMP DEFAULT NOW(),
   UNIQUE(vehicle_id, booking_id, seat_number)

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { supabase } from "./supabase/client";
 
-const API_URL = "http://localhost:5000/api";
+const API_URL = import.meta.env.VITE_API_URL || '/api';
 
 export default function VehiclesManagement() {
   const [vehicles, setVehicles] = useState([]);
@@ -18,6 +18,8 @@ export default function VehiclesManagement() {
     type: "Car",
     capacity: 4,
     pricePerDay: "",
+    origin: "",
+    destination: "",
     status: "active",
     imageUrl: "",
     category: "suv",
@@ -75,6 +77,8 @@ export default function VehiclesManagement() {
       type: vehicle.type || "Car",
       capacity: vehicle.capacity || 4,
       pricePerDay: vehicle.pricePerDay || "",
+      origin: vehicle.origin || "",
+      destination: vehicle.destination || "",
       status: vehicle.status || "active",
       imageUrl: vehicle.imageUrl || "",
       category: vehicle.category || "suv",
@@ -135,6 +139,8 @@ export default function VehiclesManagement() {
         ...formData,
         capacity: Number(formData.capacity),
         pricePerDay: Number(formData.pricePerDay),
+        origin: formData.origin,
+        destination: formData.destination,
         imageUrl: uploadedImageUrl,
         ac: String(formData.ac) === "true",
         features: typeof formData.features === 'string' ? formData.features.split(',').map(f => f.trim()).filter(Boolean) : formData.features,
@@ -249,6 +255,30 @@ export default function VehiclesManagement() {
                 value={formData.pricePerDay}
                 onChange={handleInputChange}
                 required
+                className="w-full border border-gray-300 rounded-md p-2 focus:ring-blue-500 focus:border-blue-500"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Origin</label>
+              <input
+                type="text"
+                name="origin"
+                value={formData.origin}
+                onChange={handleInputChange}
+                placeholder="Enter departure city or route"
+                className="w-full border border-gray-300 rounded-md p-2 focus:ring-blue-500 focus:border-blue-500"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Destination</label>
+              <input
+                type="text"
+                name="destination"
+                value={formData.destination}
+                onChange={handleInputChange}
+                placeholder="Enter arrival city or route"
                 className="w-full border border-gray-300 rounded-md p-2 focus:ring-blue-500 focus:border-blue-500"
               />
             </div>

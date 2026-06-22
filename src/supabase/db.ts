@@ -3,9 +3,15 @@ import { supabase } from "./client";
 const API_URL = import.meta.env.VITE_API_URL || "/api";
 
 // --- VEHICLES ---
-export const getVehicles = async () => {
-  const response = await fetch(`${API_URL}/vehicles`);
-  if (!response.ok) throw new Error("Failed to fetch vehicles");
+export const getVehicles = async (filters?: { status?: string; origin?: string; destination?: string }) => {
+  const query = new URLSearchParams();
+  if (filters?.status) query.append('status', filters.status.trim());
+  if (filters?.origin) query.append('origin', filters.origin.trim());
+  if (filters?.destination) query.append('destination', filters.destination.trim());
+
+  const url = `${API_URL}/vehicles${query.toString() ? `?${query.toString()}` : ''}`;
+  const response = await fetch(url);
+  if (!response.ok) throw new Error('Failed to fetch vehicles');
   return response.json();
 };
 
@@ -187,6 +193,39 @@ export const getTours = async () => {
   const response = await fetch(`${API_URL}/tours`);
   if (!response.ok) throw new Error("Failed to fetch tours");
   return response.json();
+};
+
+export const getSponsors = async (activeOnly = false) => {
+  const response = await fetch(`${API_URL}/sponsors${activeOnly ? '?active=true' : ''}`);
+  if (!response.ok) throw new Error("Failed to fetch sponsors");
+  return response.json();
+};
+
+export const addSponsor = async (data: any) => {
+  const response = await fetch(`${API_URL}/sponsors`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+  if (!response.ok) throw new Error("Failed to add sponsor");
+  return response.json();
+};
+
+export const updateSponsor = async (sponsorId: string, data: any) => {
+  const response = await fetch(`${API_URL}/sponsors/${sponsorId}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+  if (!response.ok) throw new Error("Failed to update sponsor");
+  return response.json();
+};
+
+export const deleteSponsor = async (sponsorId: string) => {
+  const response = await fetch(`${API_URL}/sponsors/${sponsorId}`, {
+    method: "DELETE",
+  });
+  if (!response.ok) throw new Error("Failed to delete sponsor");
 };
 
 export const addTour = async (data: any) => {

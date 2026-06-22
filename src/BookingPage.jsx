@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { SeatSelector } from './components/SeatSelector';
 
-const API_URL = "http://localhost:5000/api";
+const API_URL = import.meta.env.VITE_API_URL || '/api';
 
 export default function BookingPage() {
   const { vehicleId } = useParams();
@@ -21,8 +21,10 @@ export default function BookingPage() {
     destination: '',
     travelDate: '',
     passengers: 1,
+    passengerDetails: [],
   });
   const [selectedSeats, setSelectedSeats] = useState([]);
+  const [availability, setAvailability] = useState({ totalAvailable: null });
 
   useEffect(() => {
     const fetchVehicleDetails = async () => {
@@ -48,7 +50,28 @@ export default function BookingPage() {
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
-    setFormData(prev => ({ ...prev, [name]: value }));
+    setFormData(prev => {
+      const newFormData = { ...prev, [name]: value };
+      if (name === 'passengers') {
+        const numPassengers = Number(value) || 1;
+        const newDetails = Array.from({ length: numPassengers }, (_, i) => 
+          prev.passengerDetails[i] || { name: '', gender: 'not_specified' }
+        );
+        newFormData.passengerDetails = newDetails;
+        // Also, ensure selected seats don't exceed the new passenger count
+        if (selectedSeats.length > numPassengers) {
+          setSelectedSeats(selectedSeats.slice(0, numPassengers));
+        }
+      }
+      return newFormData;
+    });
+  };
+  const handlePassengerDetailChange = (index, field, value) => {
+    setFormData(prev => {
+      const newDetails = [...prev.passengerDetails];
+      newDetails[index] = { ...newDetails[index], [field]: value };
+      return { ...prev, passengerDetails: newDetails };
+    });
   };
 
   const handleSubmit = async (e) => {
@@ -90,7 +113,13 @@ export default function BookingPage() {
           vehicleId: Number(vehicleId),
           bookingId: newBooking.id,
           seatNumbers: selectedSeats,
-          passengerName: formData.customerName
+          passengerName: formData.customerName,
+          travelDate: formData.travelDate,
+          passengers: formData.passengerDetails.map((p, i) => ({
+            ...p,
+            seat: selectedSeats[i],
+            seatLabel: selectedSeats[i],
+          })),
         };
 
         const seatResponse = await fetch(`${API_URL}/seat-bookings`, {
@@ -118,6 +147,10 @@ export default function BookingPage() {
   if (loading) return <div className="text-center p-12">Loading vehicle details...</div>;
   if (error) return <div className="text-center p-12 text-red-500">Error: {error}</div>;
   if (!vehicle) return <div className="text-center p-12">Vehicle not found.</div>;
+
+  const maxPassengers = availability.totalAvailable !== null 
+    ? Math.min(vehicle.capacity, availability.totalAvailable) 
+    : vehicle.capacity;
 
   return (
     <div className="bg-gray-50 py-12">
@@ -162,12 +195,36 @@ export default function BookingPage() {
               </div>
               <div>
                 <label htmlFor="passengers" className="block text-sm font-medium text-gray-700">Number of Passengers</label>
-                <input type="number" name="passengers" id="passengers" value={formData.passengers} onChange={handleInputChange} required min="1" max={vehicle.capacity} className="mt-1 block w-full border-gray-300 rounded-md shadow-sm p-2" />
+                <input type="number" name="passengers" id="passengers" value={formData.passengers} onChange={handleInputChange} required min="1" max={maxPassengers} className="mt-1 block w-full border-gray-300 rounded-md shadow-sm p-2" />
+                {availability.totalAvailable !== null && (
+                  <p className="text-xs text-gray-500 mt-1">
+                    {availability.totalAvailable} seats available on this date.
+                  </p>
+                )}
               </div>
               <div>
                 <label htmlFor="travelDate" className="block text-sm font-medium text-gray-700">Travel Date</label>
                 <input type="date" name="travelDate" id="travelDate" value={formData.travelDate} onChange={handleInputChange} required className="mt-1 block w-full border-gray-300 rounded-md shadow-sm p-2" min={new Date().toISOString().split('T')[0]} />
               </div>
+
+              {/* Passenger Gender Inputs */}
+              {formData.passengerDetails.map((passenger, index) => (
+                <div key={index} className="p-3 border rounded-md bg-gray-50">
+                  <label className="block text-sm font-medium text-gray-700">
+                    Passenger {index + 1} Details (Seat: {selectedSeats[index] || 'N/A'})
+                  </label>
+                  <div className="mt-2 space-y-2">
+                    <input type="text" placeholder="Passenger Name" value={passenger.name} onChange={(e) => handlePassengerDetailChange(index, 'name', e.target.value)} className="block w-full border-gray-300 rounded-md shadow-sm p-2" />
+                    <select value={passenger.gender} onChange={(e) => handlePassengerDetailChange(index, 'gender', e.target.value)} className="block w-full border-gray-300 rounded-md shadow-sm p-2">
+                      <option value="not_specified">Select Gender</option>
+                      <option value="male">Male</option>
+                      <option value="female">Female</option>
+                      <option value="other">Other</option>
+                    </select>
+                  </div>
+                </div>
+              ))}
+
               <button type="submit" disabled={isSubmitting} className="w-full bg-blue-600 text-white py-3 rounded-md hover:bg-blue-700 transition font-semibold disabled:opacity-50">
                 {isSubmitting ? 'Processing...' : `Confirm Booking for ₹${vehicle.pricePerDay}`}
               </button>
@@ -182,6 +239,7 @@ export default function BookingPage() {
               vehicleId={Number(vehicleId)}
               date={formData.travelDate}
               onSeatsSelected={setSelectedSeats}
+              onAvailabilityChange={setAvailability}
             />
           </div>
         )}

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import VehicleCard from './VehicleCard'; // Import the new component
 
-const API_URL = "http://localhost:5000/api";
+const API_URL = import.meta.env.VITE_API_URL || '/api';
 
 export default function OurFleet() {
   const [vehicles, setVehicles] = useState([]);

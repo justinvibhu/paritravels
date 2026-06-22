@@ -2,6 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import { createClient } from '@supabase/supabase-js';
+import fs from 'fs/promises';
 
 dotenv.config();
 
@@ -15,6 +16,21 @@ const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
 
 const supabase = createClient(supabaseUrl, supabaseServiceKey);
+const sponsorsFilePath = new URL('./sponsors.json', import.meta.url);
+
+const readSponsorsFile = async () => {
+  try {
+    const contents = await fs.readFile(sponsorsFilePath, 'utf8');
+    return JSON.parse(contents || '[]');
+  } catch (err) {
+    if (err.code === 'ENOENT') return [];
+    throw err;
+  }
+};
+
+const writeSponsorsFile = async (data) => {
+  await fs.writeFile(sponsorsFilePath, JSON.stringify(data, null, 2), 'utf8');
+};
 
 // Generic helper to convert object keys from snake_case to camelCase
 const toCamel = (s) => s.replace(/_([a-z])/g, (g) => g[1].toUpperCase());
@@ -35,6 +51,102 @@ const keysToCamel = (o) => {
   return o;
 };
 
+const normalizeSeatLabel = (label) => {
+  if (label === null || label === undefined) return '';
+  return String(label).trim().toUpperCase();
+};
+
+const buildSeatLayout = (seatLabels, capacity = 0) => {
+  if (Array.isArray(seatLabels) && seatLabels.length > 0) {
+    return seatLabels.map((row, rowIndex) => {
+      if (Array.isArray(row)) {
+        return row.map((cell, colIndex) => {
+          if (typeof cell === 'string') {
+            const trimmed = cell.trim();
+            const normalized = trimmed.toUpperCase();
+            if (normalized === 'AISLE') {
+              return { type: 'aisle', label: '', id: `aisle-${rowIndex}-${colIndex}` };
+            }
+            if (normalized === 'EMPTY' || trimmed === '') {
+              return { type: 'empty', label: '', id: `empty-${rowIndex}-${colIndex}` };
+            }
+            return { type: 'seat', label: trimmed, id: trimmed || `seat-${rowIndex}-${colIndex}` };
+          }
+          if (isObject(cell)) {
+            const type = cell.type || (typeof cell.label === 'string' && cell.label.toLowerCase() === 'aisle' ? 'aisle' : 'seat');
+            const label = cell.label || '';
+            const id = cell.id || label || `seat-${rowIndex}-${colIndex}`;
+            return { type, label, id };
+          }
+          return { type: 'empty', label: '', id: `empty-${rowIndex}-${colIndex}` };
+        });
+      }
+      return [{ type: 'empty', label: '', id: `empty-${rowIndex}-0` }];
+    });
+  }
+
+  const columns = 4;
+  const rows = [];
+  let seatIndex = 0;
+  for (let rowIndex = 0; rowIndex < Math.ceil(capacity / columns); rowIndex += 1) {
+    const row = [];
+    for (let colIndex = 0; colIndex < columns; colIndex += 1) {
+      if (seatIndex >= capacity) break;
+      const label = `${String.fromCharCode(65 + rowIndex)}${colIndex + 1}`;
+      row.push({ type: 'seat', label, id: label });
+      seatIndex += 1;
+    }
+    rows.push(row);
+  }
+  return rows;
+};
+
+const findSeatNumberByLabel = (seatLabel, seatLayout) => {
+  const normalizedSearch = normalizeSeatLabel(seatLabel);
+  if (!normalizedSearch || !Array.isArray(seatLayout)) return null;
+  let seatNumber = 0;
+  for (const row of seatLayout) {
+    for (const cell of row) {
+      if (cell.type === 'seat') {
+        seatNumber += 1;
+        if (normalizeSeatLabel(cell.label) === normalizedSearch) {
+          return seatNumber;
+        }
+      }
+    }
+  }
+  return null;
+};
+
+const resolveBookingId = async (bookingId) => {
+  if (typeof bookingId === 'number') return bookingId;
+  if (typeof bookingId !== 'string') return null;
+
+  if (/^\d+$/.test(bookingId)) {
+    return Number(bookingId);
+  }
+
+  const { data, error } = await supabase
+    .from('bookings')
+    .select('id')
+    .eq('booking_id', bookingId)
+    .single();
+
+  if (error) return null;
+  return data?.id ?? null;
+};
+
+const getBookingIdsForDate = async (date) => {
+  // Get all bookings for this date that are PENDING or CONFIRMED (not cancelled/completed)
+  const { data: bookings, error } = await supabase
+    .from('bookings')
+    .select('id')
+    .eq('travel_date', date)
+    .in('booking_status', ['pending', 'confirmed']);
+  if (error) throw error;
+  return (bookings || []).map((booking) => booking.id).filter((id) => id !== null && id !== undefined);
+};
+
 // Get all vehicles
 app.get('/api/vehicles', async (req, res, next) => {
   try {
@@ -44,6 +156,16 @@ app.get('/api/vehicles', async (req, res, next) => {
     // This allows the public site to fetch only 'active' vehicles.
     if (req.query.status) {
       query = query.eq('status', req.query.status);
+    }
+
+    const originFilter = typeof req.query.origin === 'string' ? req.query.origin.trim() : '';
+    const destinationFilter = typeof req.query.destination === 'string' ? req.query.destination.trim() : '';
+
+    if (originFilter) {
+      query = query.ilike('origin', `%${originFilter}%`);
+    }
+    if (destinationFilter) {
+      query = query.ilike('destination', `%${destinationFilter}%`);
     }
 
     const { data, error } = await query;
@@ -82,7 +204,7 @@ app.get('/api/vehicles/:id', async (req, res, next) => {
 });
 
 const buildVehiclePayloads = (body) => {
-  const { name, vehicleNumber, vehicle_number, type, capacity, pricePerDay, price, status, imageUrl, image_url, category, ac, features, rating, reviews } = body;
+  const { name, vehicleNumber, vehicle_number, type, capacity, pricePerDay, price, status, imageUrl, image_url, category, ac, features, rating, reviews, origin, destination } = body;
   const vehicleNo = vehicleNumber || vehicle_number;
   const resolvedImage = imageUrl || image_url;
   const resolvedPrice = pricePerDay || price;
@@ -102,6 +224,9 @@ const buildVehiclePayloads = (body) => {
     features,
     rating,
     reviews,
+    origin,
+    destination,
+    seatLabels: body.seatLabels || body.seat_labels || [],
   };
 
   const snakePayload = {
@@ -117,6 +242,9 @@ const buildVehiclePayloads = (body) => {
     features,
     rating,
     reviews,
+    origin,
+    destination,
+    seat_labels: body.seatLabels || body.seat_labels || [],
   };
 
   return { camelPayload, snakePayload };
@@ -424,6 +552,81 @@ app.delete('/api/drivers/:id', async (req, res, next) => {
   }
 });
 
+// --- SPONSORS API ---
+
+app.get('/api/sponsors', async (req, res, next) => {
+  try {
+    const sponsors = await readSponsorsFile();
+    const activeOnly = req.query.active === 'true';
+    const filtered = activeOnly ? sponsors.filter((s) => s.active) : sponsors;
+    res.json(keysToCamel(filtered));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/sponsors', async (req, res, next) => {
+  try {
+    const { title, description, imageUrl, link, active } = req.body;
+    if (!title) return res.status(400).json({ error: 'Sponsor title is required.' });
+
+    const sponsors = await readSponsorsFile();
+    const newSponsor = {
+      id: `${Date.now()}`,
+      title,
+      description: description || '',
+      imageUrl: imageUrl || '',
+      link: link || '',
+      active: active === undefined ? true : Boolean(active),
+      createdAt: new Date().toISOString(),
+    };
+
+    sponsors.push(newSponsor);
+    await writeSponsorsFile(sponsors);
+    res.status(201).json(keysToCamel(newSponsor));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.put('/api/sponsors/:id', async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const sponsors = await readSponsorsFile();
+    const sponsorIndex = sponsors.findIndex((s) => `${s.id}` === `${id}`);
+    if (sponsorIndex === -1) return res.status(404).json({ error: 'Sponsor not found.' });
+
+    const sponsor = sponsors[sponsorIndex];
+    const updatedSponsor = {
+      ...sponsor,
+      ...req.body,
+      active: req.body.active === undefined ? sponsor.active : Boolean(req.body.active),
+      id: sponsor.id,
+      createdAt: sponsor.createdAt || new Date().toISOString(),
+    };
+
+    sponsors[sponsorIndex] = updatedSponsor;
+    await writeSponsorsFile(sponsors);
+    res.json(keysToCamel(updatedSponsor));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.delete('/api/sponsors/:id', async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const sponsors = await readSponsorsFile();
+    const filtered = sponsors.filter((s) => `${s.id}` !== `${id}`);
+    if (filtered.length === sponsors.length) return res.status(404).json({ error: 'Sponsor not found.' });
+
+    await writeSponsorsFile(filtered);
+    res.status(204).send();
+  } catch (error) {
+    next(error);
+  }
+});
+
 // --- BOOKINGS API ---
 
 // Admin: create user (uses Service Role key, bypasses RLS)
@@ -578,60 +781,139 @@ app.delete('/api/bookings/:id', async (req, res, next) => {
 app.get('/api/vehicles/:id/seats', async (req, res, next) => {
   try {
     const { id } = req.params;
-    const { date } = req.query; // YYYY-MM-DD format
+    const { date, vehicleId: queryVehicleId } = req.query;
 
     if (!date) return res.status(400).json({ error: 'date query parameter required' });
 
-    // Get vehicle capacity
     const { data: vehicle, error: vehicleError } = await supabase
       .from('vehicles')
-      .select('capacity')
+      .select('capacity, seat_labels')
       .eq('id', id)
       .single();
 
     if (vehicleError) throw vehicleError;
     if (!vehicle) return res.status(404).json({ error: 'Vehicle not found' });
 
-    // Get booked seats for this vehicle on this date
-    const { data: bookedSeats, error: seatsError } = await supabase
+    const capacity = vehicle.capacity || 0;
+    if (capacity <= 0) {
+      return res.status(400).json({ error: 'Vehicle has no capacity configured' });
+    }
+
+    // Get ONLY pending/confirmed bookings (exclude cancelled, completed, etc)
+    const bookingIds = await getBookingIdsForDate(date);
+    let bookedSeatsQuery = supabase
       .from('seat_bookings')
-      .select('seat_number, seat_label, passenger_name')
-      .eq('vehicle_id', id)
-      .gte('booked_at', date + 'T00:00:00')
-      .lt('booked_at', date + 'T23:59:59');
+      .select('seat_number, seat_label, passenger_name, booking_id, gender')
+      .eq('vehicle_id', id);
+    
+    if (bookingIds.length > 0) {
+      bookedSeatsQuery = bookedSeatsQuery.in('booking_id', bookingIds);
+    } else {
+      // If no bookings for this date, return empty set (no booked seats)
+      bookedSeatsQuery = bookedSeatsQuery.eq('booking_id', -1);
+    }
+    
+    const { data: bookedSeats, error: seatsError } = await bookedSeatsQuery;
 
     if (seatsError) throw seatsError;
 
-    // Generate available seats (1 to capacity)
-    const bookedNumbers = bookedSeats?.map(s => s.seat_number) || [];
+    const seatLayout = buildSeatLayout(vehicle.seat_labels, capacity);
+    
+    // Create map of booked seats with their details
+    const bookedSeatsMap = {};
+    (bookedSeats || []).forEach((s) => {
+      const normalizedLabel = normalizeSeatLabel(s.seat_label || s.seat_number);
+      bookedSeatsMap[normalizedLabel] = {
+        passengerName: s.passenger_name || 'N/A',
+        gender: s.gender || 'not_specified',
+        bookingId: s.booking_id,
+      };
+    });
+
+    let seatCounter = 0;
+    const layout = seatLayout.map((row) => row.map((cell) => {
+      if (cell.type !== 'seat') return cell;
+      seatCounter += 1;
+      const label = cell.label || String(seatCounter);
+      const normalizedLabel = normalizeSeatLabel(label);
+      const isBooked = !!bookedSeatsMap[normalizedLabel];
+      return {
+        ...cell,
+        label,
+        type: 'seat',
+        seatNumber: seatCounter,
+        booked: isBooked,
+        gender: bookedSeatsMap[normalizedLabel]?.gender || null,
+      };
+    }));
+
     const availableSeats = [];
     const bookedSeatsList = [];
+    const femaleOccupiedSeats = new Set();
 
-    for (let i = 1; i <= vehicle.capacity; i++) {
-      if (bookedNumbers.includes(i)) {
+    layout.flat().forEach((cell) => {
+      if (cell.type !== 'seat') return;
+      const normalizedLabel = normalizeSeatLabel(cell.label);
+      
+      if (cell.booked && bookedSeatsMap[normalizedLabel]) {
+        const bookingInfo = bookedSeatsMap[normalizedLabel];
         bookedSeatsList.push({
-          seatNumber: i,
-          seatLabel: bookedSeats.find(s => s.seat_number === i)?.seat_label || String(i),
-          passengerName: bookedSeats.find(s => s.seat_number === i)?.passenger_name || 'N/A',
-          status: 'booked'
+          seatNumber: cell.seatNumber,
+          seatLabel: cell.label,
+          passengerName: bookingInfo.passengerName,
+          gender: bookingInfo.gender,
+          status: 'booked',
         });
-      } else {
+        if (bookingInfo.gender === 'female') {
+          femaleOccupiedSeats.add(cell.label);
+        }
+      } else if (!cell.booked) {
         availableSeats.push({
-          seatNumber: i,
-          seatLabel: String(i),
-          status: 'available'
+          seatNumber: cell.seatNumber,
+          seatLabel: cell.label,
+          status: 'available',
         });
       }
-    }
+    });
+
+    // Identify adjacent female seats
+    const adjacentFemaleSeats = new Map();
+    const detectAdjacent = (seatLabel) => {
+      const match = seatLabel.match(/^([A-Z])(\d+)$/);
+      if (!match) return [];
+      const [, row, col] = match;
+      const colNum = Number(col);
+      const adjacent = [];
+      // Check same row ±1 column
+      if (colNum > 1) adjacent.push(`${row}${colNum - 1}`);
+      if (colNum < 4) adjacent.push(`${row}${colNum + 1}`);
+      return adjacent;
+    };
+
+    availableSeats.forEach((seat) => {
+      const adjacent = detectAdjacent(seat.seatLabel);
+      const adjacentFemales = adjacent.filter((label) => femaleOccupiedSeats.has(label));
+      if (adjacentFemales.length > 0) {
+        adjacentFemaleSeats.set(seat.seatLabel, adjacentFemales);
+      }
+    });
+
+    // Calculate remaining capacity
+    const totalBooked = bookedSeatsList.length;
+    const totalAvailable = capacity - totalBooked;
+    const fullyBooked = totalAvailable <= 0;
 
     res.json({
       vehicleId: id,
-      capacity: vehicle.capacity,
+      capacity: capacity,
+      totalBooked: totalBooked,
+      totalAvailable: totalAvailable,
+      fullyBooked: fullyBooked,
       date,
+      layout,
       availableSeats,
       bookedSeats: bookedSeatsList,
-      totalAvailable: availableSeats.length,
-      totalBooked: bookedSeatsList.length
+      adjacentFemaleSeats: Object.fromEntries(adjacentFemaleSeats),
     });
   } catch (error) {
     next(error);
@@ -641,45 +923,105 @@ app.get('/api/vehicles/:id/seats', async (req, res, next) => {
 // Book seats for a customer (called after booking is created)
 app.post('/api/seat-bookings', async (req, res, next) => {
   try {
-    const { vehicleId, bookingId, seatNumbers, passengerName } = req.body;
+    const { vehicleId, bookingId, seatNumbers, passengerName, travelDate, vehicleName, origin, destination, passengers } = req.body;
 
-    if (!vehicleId || !bookingId || !seatNumbers || !Array.isArray(seatNumbers)) {
-      return res.status(400).json({ error: 'vehicleId, bookingId, and seatNumbers array are required' });
+    if (!vehicleId || !seatNumbers || !Array.isArray(seatNumbers)) {
+      return res.status(400).json({ error: 'vehicleId and seatNumbers array are required' });
     }
 
-    // Support seat identifiers as numbers or labels (e.g., 'C4'). Convert labels to numeric seat_number using 4 columns per row.
+    const { data: vehicle, error: vehicleError } = await supabase
+      .from('vehicles')
+      .select('capacity, seat_labels')
+      .eq('id', vehicleId)
+      .single();
+
+    if (vehicleError) throw vehicleError;
+
+    let bookingIdValue = null;
+    if (typeof bookingId === 'number') {
+      bookingIdValue = bookingId;
+    } else if (typeof bookingId === 'string' && /^\d+$/.test(bookingId)) {
+      bookingIdValue = Number(bookingId);
+    }
+
+    if (!bookingIdValue) {
+      const bookingPayload = {
+        customer_name: passengerName || 'Admin Booking',
+        origin: origin || 'Admin',
+        destination: destination || 'Admin',
+        travel_date: travelDate || null,
+        amount: 0,
+        vehicle_name: vehicleName || 'Admin Vehicle',
+        passengers: 1,
+        booking_status: 'confirmed',
+      };
+
+      const { data: bookingData, error: bookingError } = await supabase
+        .from('bookings')
+        .insert([bookingPayload])
+        .select('id');
+
+      if (bookingError) throw bookingError;
+      if (!bookingData || bookingData.length === 0) {
+        throw new Error('Failed to create admin booking record');
+      }
+
+      bookingIdValue = bookingData[0].id;
+    }
+
+    const seatLayout = buildSeatLayout(vehicle?.seat_labels, vehicle?.capacity || 0);
     const seatsPerRow = 4;
+
     const seatBookings = seatNumbers.map((s) => {
       let seat_number = null;
       let seat_label = null;
+      let gender = null;
 
       if (typeof s === 'number') {
         seat_number = s;
         seat_label = String(s);
       } else if (typeof s === 'string') {
-        seat_label = s;
-        // Parse label like 'C4' -> row 'C' and column 4
-        const match = s.match(/^([A-Za-z])(\d+)$/);
+        seat_label = s.trim().toUpperCase();
+        const match = seat_label.match(/^([A-Za-z])(\d+)$/);
         if (match) {
           const rowLetter = match[1].toUpperCase();
           const colNum = Number(match[2]);
-          const rowIndex = rowLetter.charCodeAt(0) - 65; // A -> 0
+          const rowIndex = rowLetter.charCodeAt(0) - 65;
           seat_number = rowIndex * seatsPerRow + colNum;
-        } else {
-          // fallback: try to parse numeric part
-          const n = parseInt(s, 10);
-          if (!isNaN(n)) {
-            seat_number = n;
-          }
         }
+
+        if (seat_number === null) {
+          seat_number = findSeatNumberByLabel(seat_label, seatLayout);
+        }
+
+        if (seat_number === null) {
+          const n = parseInt(s, 10);
+          if (!isNaN(n)) seat_number = n;
+        }
+      }
+
+      if (Array.isArray(passengers)) {
+        const passengerInfo = passengers.find((p) => normalizeSeatLabel(p.seat || p.seatLabel) === normalizeSeatLabel(s));
+        if (passengerInfo) {
+          gender = (passengerInfo.gender || 'not_specified').toLowerCase();
+        }
+      }
+      // Fallback for single manual booking where 'passengers' array might not be provided
+      if (!gender && req.body.gender) {
+        gender = req.body.gender;
+      }
+
+      if (seat_number === null) {
+        throw new Error(`Could not determine seat_number for seat label ${s}`);
       }
 
       return {
         vehicle_id: vehicleId,
-        booking_id: bookingId,
-        seat_number: seat_number,
-        seat_label: seat_label || String(seat_number || ''),
-        passenger_name: passengerName || 'N/A'
+        booking_id: bookingIdValue,
+        seat_number,
+        seat_label: seat_label || String(seat_number),
+        passenger_name: passengerName || 'N/A',
+        gender: gender || 'not_specified',
       };
     });
 
@@ -688,9 +1030,96 @@ app.post('/api/seat-bookings', async (req, res, next) => {
       .insert(seatBookings)
       .select();
 
-    if (error) throw error;
+    if (error) {
+      // Check if error is due to UNIQUE constraint (seat already booked)
+      if (error.code === '23505' || error.message.includes('unique')) {
+        throw new Error('One or more seats are already booked. Please select different seats.');
+      }
+      throw error;
+    }
 
     res.status(201).json(keysToCamel(data));
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Validate seat booking before confirmation (race condition prevention)
+app.post('/api/validate-seats', async (req, res, next) => {
+  try {
+    const { vehicleId, seatLabels, date } = req.body;
+
+    if (!vehicleId || !seatLabels || !Array.isArray(seatLabels) || !date) {
+      return res.status(400).json({ error: 'vehicleId, seatLabels array, and date are required' });
+    }
+
+    // Get vehicle capacity
+    const { data: vehicle, error: vehicleError } = await supabase
+      .from('vehicles')
+      .select('capacity, seat_labels')
+      .eq('id', vehicleId)
+      .single();
+
+    if (vehicleError || !vehicle) {
+      return res.status(404).json({ error: 'Vehicle not found' });
+    }
+
+    const capacity = vehicle.capacity || 0;
+
+    // Get currently booked seats for this date
+    const bookingIds = await getBookingIdsForDate(date);
+    let bookedSeatsQuery = supabase
+      .from('seat_bookings')
+      .select('seat_label')
+      .eq('vehicle_id', vehicleId);
+    
+    if (bookingIds.length > 0) {
+      bookedSeatsQuery = bookedSeatsQuery.in('booking_id', bookingIds);
+    } else {
+      bookedSeatsQuery = bookedSeatsQuery.eq('booking_id', -1);
+    }
+
+    const { data: bookedSeats, error: seatsError } = await bookedSeatsQuery;
+
+    if (seatsError) throw seatsError;
+
+    const bookedLabels = new Set((bookedSeats || []).map((s) => normalizeSeatLabel(s.seat_label)));
+    const normalizedRequested = seatLabels.map((s) => normalizeSeatLabel(s));
+
+    // Check if any requested seat is already booked
+    const alreadyBooked = normalizedRequested.filter((label) => bookedLabels.has(label));
+    if (alreadyBooked.length > 0) {
+      return res.status(409).json({
+        error: 'Seat unavailable',
+        message: `Seat(s) ${alreadyBooked.join(', ')} are already booked. Please select different seats.`,
+        unavailableSeats: alreadyBooked,
+      });
+    }
+
+    // Check if adding these seats would exceed capacity
+    const totalBooked = bookedLabels.size;
+    const totalRequested = normalizedRequested.length;
+    const totalAfter = totalBooked + totalRequested;
+
+    if (totalAfter > capacity) {
+      return res.status(400).json({
+        error: 'Overbooking',
+        message: `Cannot book ${totalRequested} seat(s). Vehicle has capacity ${capacity}, and ${totalBooked} are already booked. Only ${capacity - totalBooked} seat(s) remaining.`,
+        capacity: capacity,
+        booked: totalBooked,
+        available: capacity - totalBooked,
+        requested: totalRequested,
+      });
+    }
+
+    res.json({
+      valid: true,
+      message: 'Seats are available',
+      capacity: capacity,
+      booked: totalBooked,
+      available: capacity - totalBooked,
+      requestedCount: totalRequested,
+    });
   } catch (error) {
     next(error);
   }
@@ -701,19 +1130,20 @@ app.get('/api/admin/vehicles/:id/seats', async (req, res, next) => {
   try {
     const { id } = req.params;
 
-    // Get vehicle info
     const { data: vehicle, error: vehicleError } = await supabase
       .from('vehicles')
-      .select('id, name, capacity')
+      .select('id, name, capacity, seat_labels')
       .eq('id', id)
       .single();
 
     if (vehicleError) throw vehicleError;
     if (!vehicle) return res.status(404).json({ error: 'Vehicle not found' });
 
-    // Get all seat bookings with booking details
-    // Select the related bookings row with all columns to avoid missing-column errors
-    const { data: seatBookings, error: seatsError } = await supabase
+    const { date } = req.query;
+
+    const bookingIds = date ? await getBookingIdsForDate(date) : [];
+
+    let query = supabase
       .from('seat_bookings')
       .select(`
         id,
@@ -723,14 +1153,43 @@ app.get('/api/admin/vehicles/:id/seats', async (req, res, next) => {
         booked_at,
         bookings(*)
       `)
-      .eq('vehicle_id', id)
-      .order('seat_number', { ascending: true });
+      .eq('vehicle_id', id);
+
+    if (date) {
+      if (bookingIds.length > 0) {
+        query = query.in('booking_id', bookingIds);
+      } else {
+        // No bookings for this date, force empty result
+        query = query.eq('booking_id', -1);
+      }
+    }
+
+    const { data: seatBookings, error: seatsError } = await query.order('seat_number', { ascending: true });
 
     if (seatsError) throw seatsError;
 
+    const seatLayout = buildSeatLayout(vehicle.seat_labels, vehicle.capacity || 0);
+    const bookedLabels = new Set((seatBookings || []).map((seat) => normalizeSeatLabel(seat.seat_label || seat.seatLabel || String(seat.seat_number))));
+
+    let seatCounter = 0;
+    const layout = seatLayout.map((row) => row.map((cell) => {
+      if (cell.type !== 'seat') return cell;
+      seatCounter += 1;
+      const label = cell.label || String(seatCounter);
+      return {
+        ...cell,
+        label,
+        seatNumber: seatCounter,
+        booked: bookedLabels.has(normalizeSeatLabel(label)),
+      };
+    }));
+
     res.json({
       vehicle: keysToCamel(vehicle),
-      seatBookings: keysToCamel(seatBookings || [])
+      seatBookings: keysToCamel(seatBookings || []),
+      layout,
+      totalAvailable: (layout.flat().filter((cell) => cell.type === 'seat' && !cell.booked)).length,
+      totalBooked: (layout.flat().filter((cell) => cell.type === 'seat' && cell.booked)).length,
     });
   } catch (error) {
     next(error);

@@ -28,6 +28,15 @@ export default async (req, res) => {
       if (req.query.status) {
         query = query.eq('status', req.query.status);
       }
+      const originFilter = typeof req.query.origin === 'string' ? req.query.origin.trim() : '';
+      const destinationFilter = typeof req.query.destination === 'string' ? req.query.destination.trim() : '';
+
+      if (originFilter) {
+        query = query.ilike('origin', `%${originFilter}%`);
+      }
+      if (destinationFilter) {
+        query = query.ilike('destination', `%${destinationFilter}%`);
+      }
       const { data, error } = await query;
       if (error) throw error;
       return res.status(200).json(keysToCamel(data));
@@ -36,7 +45,7 @@ export default async (req, res) => {
     }
   } else if (req.method === 'POST') {
     try {
-      const { name, vehicleNumber, vehicle_number, type, capacity, pricePerDay, price, status, imageUrl, category, ac, features, rating, reviews } = req.body;
+      const { name, vehicleNumber, vehicle_number, type, capacity, pricePerDay, price, status, imageUrl, category, ac, features, rating, reviews, origin, destination } = req.body;
       const vehicleNo = vehicleNumber || vehicle_number;
       if (!vehicleNo) {
         return res.status(400).json({ error: 'Vehicle number is required.' });
@@ -55,7 +64,9 @@ export default async (req, res) => {
           ac,
           features,
           rating,
-          reviews
+          reviews,
+          origin,
+          destination
         }])
         .select();
       if (error) throw error;
