@@ -1,5 +1,5 @@
 # Seat Management Implementation Summary
-
+gWwyNZckCWkqoXfK
 ## Overview
 Implemented complete seat booking and management system for vehicle bookings. Customers can now select specific seats during booking, and admins can manage seat availability and see which seats are booked.
 

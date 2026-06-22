@@ -93,11 +93,18 @@ export default function DriversManagement() {
 
       // Upload new image if a file was selected
       if (imageFile) {
-        const fileName = `${Date.now()}_${imageFile.name}`;
-        const { error: uploadError } = await supabase.storage.from("driver-images").upload(fileName, imageFile);
-        if (uploadError) throw uploadError;
-        const { data: publicUrlData } = supabase.storage.from("driver-images").getPublicUrl(fileName);
-        uploadedImageUrl = publicUrlData.publicUrl;
+        try {
+          const fileName = `${Date.now()}_${imageFile.name}`;
+          const { error: uploadError } = await supabase.storage.from("driver-images").upload(fileName, imageFile);
+          if (uploadError) {
+            console.warn("Image upload failed (continuing without image):", uploadError.message);
+          } else {
+            const { data: publicUrlData } = supabase.storage.from("driver-images").getPublicUrl(fileName);
+            uploadedImageUrl = publicUrlData.publicUrl;
+          }
+        } catch (uploadErr) {
+          console.warn("Image upload failed (continuing without image):", uploadErr.message);
+        }
       }
 
       const payload = {
@@ -116,7 +123,7 @@ export default function DriversManagement() {
       resetForm();
     } catch (err) {
       console.error("Error saving driver:", err);
-      alert("Failed to save driver.");
+      alert(`Failed to save driver: ${err.message || err}`);
     } finally {
       setIsSubmitting(false);
     }

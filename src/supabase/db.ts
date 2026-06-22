@@ -15,41 +15,51 @@ export const getVehicles = async (filters?: { status?: string; origin?: string; 
   return response.json();
 };
 
-export const addVehicle = async (data: any, imageFile?: File) => {
-  let imageUrl = "";
-  if (imageFile) {
-    const fileName = `${Date.now()}_${imageFile.name}`;
-    const { error: uploadError } = await supabase.storage.from("vehicle-images").upload(fileName, imageFile);
-    if (uploadError) throw uploadError;
-    const { data: publicUrlData } = supabase.storage.from("vehicle-images").getPublicUrl(fileName);
-    imageUrl = publicUrlData.publicUrl;
-  }
-
+export const addVehicle = async (data: any) => {
+  console.log('Sending vehicle data:', data);
   const response = await fetch(`${API_URL}/vehicles`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ ...data, imageUrl })
+    body: JSON.stringify(data)
   });
-  if (!response.ok) throw new Error("Failed to add vehicle");
+  
+  if (!response.ok) {
+    let errorMessage = `HTTP ${response.status}`;
+    try {
+      const errorData = await response.json();
+      errorMessage = errorData?.error || errorData?.message || errorMessage;
+      console.error('Vehicle creation error response:', response.status, errorData);
+    } catch (parseErr) {
+      const errorText = await response.text();
+      console.error('Vehicle creation error (raw text):', response.status, errorText);
+      errorMessage = errorText || errorMessage;
+    }
+    throw new Error(errorMessage);
+  }
+  
   const newVehicle = await response.json();
   return newVehicle.id || newVehicle[0]?.id;
 };
 
-export const updateVehicle = async (vehicleId: string, data: any, imageFile?: File) => {
-  let imageUrl = data.imageUrl;
-  if (imageFile) {
-    const fileName = `${Date.now()}_${imageFile.name}`;
-    const { error: uploadError } = await supabase.storage.from("vehicle-images").upload(fileName, imageFile);
-    if (uploadError) throw uploadError;
-    const { data: publicUrlData } = supabase.storage.from("vehicle-images").getPublicUrl(fileName);
-    imageUrl = publicUrlData.publicUrl;
-  }
+export const updateVehicle = async (vehicleId: string, data: any) => {
   const response = await fetch(`${API_URL}/vehicles/${vehicleId}`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ ...data, imageUrl })
+    body: JSON.stringify(data)
   });
-  if (!response.ok) throw new Error("Failed to update vehicle");
+  if (!response.ok) {
+    let errorMessage = `HTTP ${response.status}`;
+    try {
+      const errorData = await response.json();
+      errorMessage = errorData?.error || errorData?.message || errorMessage;
+      console.error('Vehicle update error response:', response.status, errorData);
+    } catch (parseErr) {
+      const errorText = await response.text();
+      console.error('Vehicle update error (raw text):', response.status, errorText);
+      errorMessage = errorText || errorMessage;
+    }
+    throw new Error(errorMessage);
+  }
 };
 
 export const deleteVehicle = async (vehicleId: string) => {

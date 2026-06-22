@@ -1,19 +1,34 @@
+import dotenv from 'dotenv';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+// Resolve __dirname for ES Modules
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// Point to the .env file in the root directory
+dotenv.config({ path: path.resolve(__dirname, '../.env') });
+
 import express from 'express';
 import cors from 'cors';
-import dotenv from 'dotenv';
 import { createClient } from '@supabase/supabase-js';
 import fs from 'fs/promises';
-
-dotenv.config();
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-const supabaseUrl = process.env.SUPABASE_URL;
+// Use VITE_ prefixed variables with a fallback to the original names
+const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL;
 
 // Use the Service Role Key on the backend to bypass RLS for administrative actions
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
+const supabaseServiceKey = process.env.VITE_SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY;
+
+if (process.env.VITE_SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY) {
+  console.log(`Using Supabase Service Role Key (starts with: ${supabaseServiceKey.substring(0, 7)})`);
+} else {
+  console.log(`Using Supabase Anon Key (starts with: ${supabaseServiceKey.substring(0, 7)})`);
+}
 
 const supabase = createClient(supabaseUrl, supabaseServiceKey);
 const sponsorsFilePath = new URL('./sponsors.json', import.meta.url);
@@ -54,6 +69,23 @@ const keysToCamel = (o) => {
 const normalizeSeatLabel = (label) => {
   if (label === null || label === undefined) return '';
   return String(label).trim().toUpperCase();
+};
+
+const formatBookingRef = (booking) => {
+  if (booking?.bookingId && typeof booking.bookingId === 'string' && booking.bookingId.startsWith('PT')) {
+    return booking.bookingId;
+  }
+
+  if (booking?.id !== undefined && booking?.id !== null) {
+    return `PT${String(booking.id).padStart(8, '0')}`;
+  }
+
+  if (booking?.createdAt) {
+    const timestamp = new Date(booking.createdAt).getTime().toString();
+    return `PT${timestamp.slice(-8)}`;
+  }
+
+  return `PT${Date.now().toString().slice(-8)}`;
 };
 
 const buildSeatLayout = (seatLabels, capacity = 0) => {
@@ -398,14 +430,15 @@ app.get('/api/tours', async (req, res, next) => {
 // Add a new tour
 app.post('/api/tours', async (req, res, next) => {
   try {
-    const { name, description, price, durationDays, active } = req.body;
+    const { name, description, price, durationDays, active, imageUrl } = req.body;
     const { data, error } = await supabase
       .from('tours')
       .insert([{ 
         name, 
         description, 
         price: Number(price), 
-        duration_days: Number(durationDays), 
+        duration_days: Number(durationDays),
+        image_url: imageUrl,
         active 
       }])
       .select();
@@ -423,11 +456,11 @@ app.post('/api/tours', async (req, res, next) => {
 app.put('/api/tours/:id', async (req, res, next) => {
   try {
     const { id } = req.params;
-    const { name, description, price, durationDays, active } = req.body;
+    const { name, description, price, durationDays, active, imageUrl } = req.body;
 
     const { data, error } = await supabase
       .from('tours')
-      .update({ name, description, price: Number(price), duration_days: Number(durationDays), active })
+      .update({ name, description, price: Number(price), duration_days: Number(durationDays), active, image_url: imageUrl })
       .eq('id', id)
       .select();
 
@@ -444,9 +477,33 @@ app.put('/api/tours/:id', async (req, res, next) => {
 app.delete('/api/tours/:id', async (req, res, next) => {
   try {
     const { id } = req.params;
-    const { error } = await supabase.from('tours').delete().eq('id', id);
 
-    if (error) throw error;
+    // 1. Fetch tour to get image URL
+    const { data: tour, error: fetchError } = await supabase
+      .from('tours')
+      .select('image_url')
+      .eq('id', id)
+      .single();
+
+    if (fetchError && fetchError.code !== 'PGRST116') throw fetchError;
+
+    // 2. Delete image from storage if it exists
+    if (tour && tour.image_url) {
+      try {
+        const urlParts = tour.image_url.split('/');
+        const fileName = urlParts[urlParts.length - 1];
+        if (fileName) {
+          await supabase.storage.from('tour-images').remove([fileName]);
+        }
+      } catch (e) {
+        console.error('Error parsing/deleting tour image:', e.message);
+      }
+    }
+
+    // 3. Delete the tour record
+    const { error: deleteError } = await supabase.from('tours').delete().eq('id', id);
+    if (deleteError) throw deleteError;
+
     res.status(204).send();
   } catch (error) {
     next(error);
@@ -474,19 +531,32 @@ app.get('/api/drivers', async (req, res, next) => {
 app.post('/api/drivers', async (req, res, next) => {
   try {
     const { name, licenseNumber, phone, experienceYears, status, imageUrl } = req.body;
+    
+    // Build minimal payload with only basic fields (adjust based on actual schema)
+    const payload = {
+      name,
+      license_number: licenseNumber,
+      phone,
+      status: status || 'available',
+    };
+    
+    // Only add optional fields if they exist and have values
+    if (experienceYears !== undefined && experienceYears !== null) {
+      payload.experience_years = Number(experienceYears);
+    }
+    if (imageUrl !== undefined && imageUrl !== null) {
+      payload.image_url = imageUrl;
+    }
+    
     const { data, error } = await supabase
       .from('drivers')
-      .insert([{ 
-        name, 
-        license_number: licenseNumber, 
-        phone, 
-        experience_years: Number(experienceYears), 
-        status: status || 'available',
-        image_url: imageUrl
-      }])
+      .insert([payload])
       .select();
 
-    if (error) throw error;
+    if (error) {
+      console.error('Driver insert error:', error);
+      throw error;
+    }
     if (!data || data.length === 0) throw new Error('Driver created but could not be retrieved.');
     
     res.status(201).json(keysToCamel(data[0]));
@@ -501,16 +571,25 @@ app.put('/api/drivers/:id', async (req, res, next) => {
     const { id } = req.params;
     const { name, licenseNumber, phone, experienceYears, status, imageUrl } = req.body;
 
+    // Build minimal payload with only basic fields
+    const payload = {
+      name,
+      license_number: licenseNumber,
+      phone,
+      status: status || 'available',
+    };
+    
+    // Only add optional fields if they exist and have values
+    if (experienceYears !== undefined && experienceYears !== null) {
+      payload.experience_years = Number(experienceYears);
+    }
+    if (imageUrl !== undefined && imageUrl !== null) {
+      payload.image_url = imageUrl;
+    }
+
     const { data, error } = await supabase
       .from('drivers')
-      .update({ 
-        name, 
-        license_number: licenseNumber, 
-        phone, 
-        experience_years: Number(experienceYears), 
-        status: status || 'available',
-        image_url: imageUrl
-      })
+      .update(payload)
       .eq('id', id)
       .select();
 
@@ -685,7 +764,12 @@ app.get('/api/bookings', async (req, res, next) => {
       .order('created_at', { ascending: false });
 
     if (error) throw error;
-    res.json(keysToCamel(data));
+
+    const camelData = keysToCamel(data).map((booking) => ({
+      ...booking,
+      bookingId: formatBookingRef(booking),
+    }));
+    res.json(camelData);
   } catch (error) {
     next(error);
   }
@@ -694,36 +778,43 @@ app.get('/api/bookings', async (req, res, next) => {
 // Add a new booking (from public form)
 app.post('/api/bookings', async (req, res, next) => {
   try {
-    const { customerName, email, phone, origin, destination, travelDate, amount, vehicleName, passengers, paymentMethod } = req.body;
+    const { customerName, email, userId, origin, destination, travelDate, amount, vehicleName, passengers, paymentMethod } = req.body;
 
     // Basic validation
-    if (!customerName || !travelDate || !amount) {
+    if (!customerName || !travelDate || amount === undefined || amount === null) {
       return res.status(400).json({ error: 'Missing required booking information.' });
+    }
+
+    const bookingId = `PT${Date.now().toString().slice(-8)}`;
+
+    const bookingPayload = {
+      customer_name: customerName,
+      origin: origin || 'TBD',
+      destination: destination || 'TBD',
+      travel_date: travelDate,
+      amount: Number(amount),
+      vehicle_name: vehicleName,
+      passengers: Number(passengers) || 1,
+      payment_method: paymentMethod || 'Online',
+      payment_status: 'pending',
+      booking_status: 'pending',
+    };
+
+    if (userId) {
+      bookingPayload.user_id = userId;
     }
 
     const { data, error } = await supabase
       .from('bookings')
-      .insert([{
-        customer_name: customerName,
-        user_email: email,
-        customer_phone: phone,
-        origin: origin || 'TBD',
-        destination: destination || 'TBD',
-        travel_date: travelDate,
-        amount: Number(amount),
-        vehicle_name: vehicleName,
-        passengers: Number(passengers) || 1,
-        payment_method: paymentMethod || 'Online',
-        // Default statuses for a new booking
-        payment_status: 'pending',
-        booking_status: 'pending',
-      }])
+      .insert([bookingPayload])
       .select();
 
     if (error) throw error;
     if (!data || data.length === 0) throw new Error('Booking created but could not be retrieved.');
 
-    res.status(201).json(keysToCamel(data[0]));
+    const createdBooking = keysToCamel(data[0]);
+    createdBooking.bookingId = formatBookingRef(createdBooking);
+    res.status(201).json(createdBooking);
   } catch (error) {
     next(error);
   }
@@ -733,9 +824,18 @@ app.post('/api/bookings', async (req, res, next) => {
 app.put('/api/bookings/:id', async (req, res, next) => {
   try {
     const { id } = req.params;
-    const { bookingStatus } = req.body;
+    const { bookingStatus, driverId } = req.body;
 
-    let query = supabase.from('bookings').update({ booking_status: bookingStatus });
+    const updatePayload = {};
+    if (bookingStatus) {
+      updatePayload.booking_status = bookingStatus;
+    }
+    // Allow setting driver_id to a number or null
+    if (driverId !== undefined) {
+      updatePayload.driver_id = driverId;
+    }
+
+    let query = supabase.from('bookings').update(updatePayload);
 
     if (/^\d+$/.test(id)) {
       query = query.eq('id', Number(id));
@@ -748,7 +848,9 @@ app.put('/api/bookings/:id', async (req, res, next) => {
     if (error) throw error;
     if (!data || data.length === 0) return res.status(404).json({ error: 'Booking not found' });
 
-    res.json(keysToCamel(data[0]));
+    const updatedBooking = keysToCamel(data[0]);
+    updatedBooking.bookingId = formatBookingRef(updatedBooking);
+    res.json(updatedBooking);
   } catch (error) {
     next(error);
   }
@@ -878,20 +980,49 @@ app.get('/api/vehicles/:id/seats', async (req, res, next) => {
 
     // Identify adjacent female seats
     const adjacentFemaleSeats = new Map();
-    const detectAdjacent = (seatLabel) => {
-      const match = seatLabel.match(/^([A-Z])(\d+)$/);
-      if (!match) return [];
-      const [, row, col] = match;
-      const colNum = Number(col);
+    const detectAdjacent = (seatLabel, layout) => {
+      const normalizedLabel = normalizeSeatLabel(seatLabel);
       const adjacent = [];
-      // Check same row ±1 column
-      if (colNum > 1) adjacent.push(`${row}${colNum - 1}`);
-      if (colNum < 4) adjacent.push(`${row}${colNum + 1}`);
+      let seatRow = -1;
+      let seatCol = -1;
+
+      // Find the seat's position in the layout
+      for (let r = 0; r < layout.length; r++) {
+        for (let c = 0; c < layout[r].length; c++) {
+          if (normalizeSeatLabel(layout[r][c].label) === normalizedLabel) {
+            seatRow = r;
+            seatCol = c;
+            break;
+          }
+        }
+        if (seatRow !== -1) break;
+      }
+
+      if (seatRow === -1) return [];
+
+      const row = layout[seatRow];
+
+      // Check left, skipping over aisles
+      for (let c = seatCol - 1; c >= 0; c--) {
+        if (row[c].type === 'seat') {
+          adjacent.push(row[c].label);
+          break; // Found the first adjacent seat, stop searching left
+        }
+      }
+
+      // Check right, skipping over aisles
+      for (let c = seatCol + 1; c < row.length; c++) {
+        if (row[c].type === 'seat') {
+          adjacent.push(row[c].label);
+          break; // Found the first adjacent seat, stop searching right
+        }
+      }
+
       return adjacent;
     };
 
     availableSeats.forEach((seat) => {
-      const adjacent = detectAdjacent(seat.seatLabel);
+      const adjacent = detectAdjacent(seat.seatLabel, layout);
       const adjacentFemales = adjacent.filter((label) => femaleOccupiedSeats.has(label));
       if (adjacentFemales.length > 0) {
         adjacentFemaleSeats.set(seat.seatLabel, adjacentFemales);

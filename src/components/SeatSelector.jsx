@@ -160,10 +160,12 @@ export function SeatSelector({ vehicleId, date, onSeatsSelected, onAvailabilityC
         textColor = 'text-gray-600';
         title = `Seat ${label} - Booked (${bookedSeat.passengerName})`;
       }
-    } else {
-      // Available seats
+    } else if (isAdjacentFemale) {
+      // Available seat, but adjacent to a female passenger
       borderColor = 'border-purple-500';
       title = `Seat ${label} - Adjacent to female passenger`;
+    } else {
+      // Standard available seat
     }
 
     return (

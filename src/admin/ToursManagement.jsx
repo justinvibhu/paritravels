@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from "react";
-import { getTours, addTour, updateTour, deleteTour } from "../supabase/db";
+import { supabase } from "../supabase/client";
+
+const API_URL = import.meta.env.VITE_API_URL || '/api';
 
 export default function ToursManagement() {
   const [tours, setTours] = useState([]);
@@ -9,6 +11,7 @@ export default function ToursManagement() {
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [imageFile, setImageFile] = useState(null);
 
   const initialFormState = {
     name: "",
@@ -16,6 +19,7 @@ export default function ToursManagement() {
     price: "",
     durationDays: "",
     active: true,
+    imageUrl: "",
   };
 
   const [formData, setFormData] = useState(initialFormState);
@@ -27,7 +31,8 @@ export default function ToursManagement() {
   const fetchTours = async () => {
     try {
       setLoading(true);
-      const data = await getTours();
+      const response = await fetch(`${API_URL}/tours`);
+      const data = await response.json();
       setTours(data || []);
       setError(null);
     } catch (err) {
@@ -46,9 +51,16 @@ export default function ToursManagement() {
     }));
   };
 
+  const handleFileChange = (e) => {
+    if (e.target.files[0]) {
+      setImageFile(e.target.files[0]);
+    }
+  };
+
   const resetForm = () => {
     setFormData(initialFormState);
     setEditingId(null);
+    setImageFile(null);
     setIsFormOpen(false);
   };
 
@@ -59,15 +71,21 @@ export default function ToursManagement() {
       price: tour.price || "",
       durationDays: tour.durationDays || "",
       active: tour.active !== undefined ? tour.active : true,
+      imageUrl: tour.imageUrl || tour.image_url || "",
     });
     setEditingId(tour.id);
+    setImageFile(null);
     setIsFormOpen(true);
   };
 
   const handleDelete = async (id) => {
     if (window.confirm("Are you sure you want to delete this tour?")) {
       try {
-        await deleteTour(id);
+        const response = await fetch(`${API_URL}/tours/${id}`, { method: 'DELETE' });
+        if (!response.ok) {
+          const errData = await response.json().catch(() => ({}));
+          throw new Error(errData.error || 'Failed to delete tour');
+        }
         setTours(tours.filter(t => t.id !== id));
       } catch (err) {
         console.error("Error deleting tour:", err);
@@ -81,23 +99,60 @@ export default function ToursManagement() {
     setIsSubmitting(true);
 
     try {
+      let uploadedImageUrl = formData.imageUrl;
+
+      // Upload new image if a file was selected
+      if (imageFile) {
+        try {
+          const fileName = `${Date.now()}_${imageFile.name}`;
+          const { error: uploadError } = await supabase.storage.from("tour-images").upload(fileName, imageFile);
+          if (uploadError) {
+            console.warn("Image upload failed (continuing without image):", uploadError.message);
+          } else {
+            const { data: publicUrlData } = supabase.storage.from("tour-images").getPublicUrl(fileName);
+            uploadedImageUrl = publicUrlData.publicUrl;
+          }
+        } catch (uploadErr) {
+          console.warn("Image upload failed (continuing without image):", uploadErr.message);
+        }
+      }
+
       const payload = {
         ...formData,
         price: Number(formData.price),
         durationDays: Number(formData.durationDays),
+        imageUrl: uploadedImageUrl,
       };
 
-      if (editingId) {
-        await updateTour(editingId, payload);
-      } else {
-        await addTour(payload);
+      const url = editingId ? `${API_URL}/tours/${editingId}` : `${API_URL}/tours`;
+      const method = editingId ? 'PUT' : 'POST';
+
+      const response = await fetch(url, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({}));
+        if (errData.error?.toLowerCase().includes('row-level security')) {
+          throw new Error('Failed to save tour: Row-level security policy violation. Ensure the backend is using the service role key.');
+        }
+        throw new Error(errData.error || 'Failed to save tour.');
       }
+
 
       await fetchTours();
       resetForm();
     } catch (err) {
-      console.error("Error saving tour:", err);
-      alert("Failed to save tour.");
+      console.error("Error saving tour:", err.message || err);
+      let errorMessage = "Failed to save tour. Please try again.";
+      if (err.message && err.message.toLowerCase().includes('bucket not found')) {
+        errorMessage = "Failed to upload image: The 'tour-images' storage bucket was not found. Please create it in your Supabase dashboard and make it public.";
+      } else if (err.message) {
+        errorMessage = `Failed to save tour: ${err.message}`;
+      }
+      alert(errorMessage);
     } finally {
       setIsSubmitting(false);
     }
@@ -127,7 +182,7 @@ export default function ToursManagement() {
               <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
               <textarea name="description" value={formData.description} onChange={handleInputChange} rows="3" className="w-full border border-gray-300 rounded-md p-2 focus:ring-blue-500 focus:border-blue-500"></textarea>
             </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Price (₹)</label>
                 <input type="number" name="price" value={formData.price} onChange={handleInputChange} required min="0" className="w-full border border-gray-300 rounded-md p-2 focus:ring-blue-500 focus:border-blue-500" />
@@ -135,6 +190,11 @@ export default function ToursManagement() {
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Duration (Days)</label>
                 <input type="number" name="durationDays" value={formData.durationDays} onChange={handleInputChange} required min="1" className="w-full border border-gray-300 rounded-md p-2 focus:ring-blue-500 focus:border-blue-500" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Tour Image</label>
+                <input type="file" accept="image/*" onChange={handleFileChange} className="w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100" />
+                {editingId && formData.imageUrl && !imageFile && <p className="text-xs text-gray-500 mt-1">Leave empty to keep current image.</p>}
               </div>
             </div>
             <div className="flex items-center">
@@ -153,6 +213,7 @@ export default function ToursManagement() {
         <table className="min-w-full divide-y divide-gray-200">
           <thead className="bg-gray-50">
             <tr>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Image</th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Duration</th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Price</th>
@@ -163,6 +224,13 @@ export default function ToursManagement() {
           <tbody className="bg-white divide-y divide-gray-200">
             {tours.map((tour) => (
               <tr key={tour.id} className="hover:bg-gray-50 transition-colors">
+                <td className="px-6 py-4 whitespace-nowrap">
+                  {tour.imageUrl || tour.image_url ? (
+                    <img src={tour.imageUrl || tour.image_url} alt={tour.name} className="h-10 w-16 object-cover rounded-md border" />
+                  ) : (
+                    <div className="h-10 w-16 bg-gray-200 rounded-md border flex items-center justify-center text-xs text-gray-400">No Img</div>
+                  )}
+                </td>
                 <td className="px-6 py-4 whitespace-nowrap">
                   <div className="text-sm font-medium text-gray-900">{tour.name}</div>
                   <div className="text-sm text-gray-500 truncate max-w-xs">{tour.description}</div>

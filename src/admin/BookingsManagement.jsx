@@ -1,20 +1,25 @@
 import React, { useState, useEffect } from "react";
-import { getAllBookings, updateBooking, deleteBooking } from "../supabase/db";
+
+const API_URL = import.meta.env.VITE_API_URL || '/api';
 
 export default function BookingsManagement() {
   const [bookings, setBookings] = useState([]);
+  const [drivers, setDrivers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [searchTerm, setSearchTerm] = useState("");
 
   useEffect(() => {
     fetchBookings();
+    fetchDrivers();
   }, []);
 
   const fetchBookings = async () => {
     try {
       setLoading(true);
-      const data = await getAllBookings();
+      const response = await fetch(`${API_URL}/bookings`);
+      if (!response.ok) throw new Error('Failed to fetch bookings');
+      const data = await response.json();
       setBookings(data || []);
       setError(null);
     } catch (err) {
@@ -25,32 +30,44 @@ export default function BookingsManagement() {
     }
   };
 
-  const handleStatusChange = async (booking) => {
-    const identifier = booking.id ?? booking.bookingId;
-    if (!identifier) {
-      alert("Cannot update this booking because it has no identifier.");
-      return;
-    }
-
+  const fetchDrivers = async () => {
     try {
-      if (booking.id) {
-        await updateBooking(identifier.toString(), { bookingStatus: booking.bookingStatus });
-      } else {
-        const bookingKey = `booking_${booking.bookingId}`;
-        const stored = localStorage.getItem(bookingKey);
-        if (stored) {
-          const parsed = JSON.parse(stored);
-          parsed.bookingStatus = booking.bookingStatus;
-          localStorage.setItem(bookingKey, JSON.stringify(parsed));
-        }
+      const response = await fetch(`${API_URL}/drivers`);
+      if (!response.ok) throw new Error('Failed to fetch drivers');
+      const data = await response.json();
+      setDrivers(data || []);
+    } catch (err) {
+      console.error("Error fetching drivers:", err);
+      // Non-critical, so we don't set a main error
+    }
+  };
+
+  const handleUpdateBooking = async (bookingId, payload) => {
+    try {
+      const response = await fetch(`${API_URL}/bookings/${bookingId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({}));
+        throw new Error(errData.error || 'Failed to update booking');
       }
 
+      const updatedBooking = await response.json();
+
+      // Update local state to reflect the change immediately
       setBookings((prevBookings) =>
         prevBookings.map((b) => {
-          if (booking.id !== undefined && booking.id !== null) {
-            return b.id === booking.id ? { ...b, bookingStatus: booking.bookingStatus } : b;
+          if (b.id === bookingId) {
+            return {
+              ...b,
+              bookingStatus: updatedBooking.bookingStatus,
+              driver: updatedBooking.driver,
+            };
           }
-          return b.bookingId === booking.bookingId ? { ...b, bookingStatus: booking.bookingStatus } : b;
+          return b;
         })
       );
     } catch (err) {
@@ -59,28 +76,22 @@ export default function BookingsManagement() {
     }
   };
 
+  const handleStatusChange = (bookingId, newStatus) => {
+    handleUpdateBooking(bookingId, { bookingStatus: newStatus });
+  };
+
+  const handleDriverChange = (bookingId, newDriverId) => {
+    // Convert empty string from "Unassigned" option to null for the DB
+    const driverId = newDriverId === '' ? null : Number(newDriverId);
+    handleUpdateBooking(bookingId, { driverId });
+  };
+
   const handleDelete = async (booking) => {
     const identifier = booking.id ?? booking.bookingId;
-    if (!identifier) {
-      alert("Cannot delete this booking because it has no identifier.");
-      return;
-    }
-
     if (window.confirm("Are you sure you want to delete this booking?")) {
       try {
-        if (booking.id !== undefined && booking.id !== null) {
-          await deleteBooking(identifier.toString());
-        } else {
-          localStorage.removeItem(`booking_${booking.bookingId}`);
-        }
-        setBookings((prevBookings) =>
-          prevBookings.filter((b) => {
-            if (booking.id !== undefined && booking.id !== null) {
-              return b.id !== booking.id;
-            }
-            return b.bookingId !== booking.bookingId;
-          })
-        );
+        await fetch(`${API_URL}/bookings/${identifier}`, { method: 'DELETE' });
+        fetchBookings(); // Refetch all bookings
       } catch (err) {
         console.error("Error deleting booking:", err);
         alert("Failed to delete booking.");
@@ -129,6 +140,7 @@ export default function BookingsManagement() {
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Travel Date</th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Amount</th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Assigned Driver</th>
               <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
             </tr>
           </thead>
@@ -136,7 +148,7 @@ export default function BookingsManagement() {
             {filteredBookings.map((booking) => (
               <tr key={booking.bookingId || booking.id?.toString() || `${booking.customerName}-${booking.travelDate || ''}`} className="hover:bg-gray-50 transition-colors">
                 <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                  {booking.bookingId || (booking.id ? booking.id.toString().slice(0, 8) : 'N/A')}
+                  {booking.bookingId || 'N/A'}
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap">
                   <div className="text-sm font-medium text-gray-900">{booking.customerName || 'Guest'}</div>
@@ -154,7 +166,7 @@ export default function BookingsManagement() {
                 <td className="px-6 py-4 whitespace-nowrap">
                   <select
                     value={booking.bookingStatus?.toLowerCase() || 'pending'}
-                      onChange={(e) => handleStatusChange({ ...booking, bookingStatus: e.target.value })}
+                      onChange={(e) => handleStatusChange(booking.id, e.target.value)}
                     className={`text-xs font-semibold rounded-full px-2 py-1 border outline-none ${
                       booking.bookingStatus?.toLowerCase() === 'confirmed' ? 'bg-green-100 text-green-800 border-green-200' :
                       booking.bookingStatus?.toLowerCase() === 'cancelled' ? 'bg-red-100 text-red-800 border-red-200' :
@@ -164,6 +176,20 @@ export default function BookingsManagement() {
                     <option value="pending">Pending</option>
                     <option value="confirmed">Confirmed</option>
                     <option value="cancelled">Cancelled</option>
+                  </select>
+                </td>
+                <td className="px-6 py-4 whitespace-nowrap">
+                  <select
+                    value={booking.driverId || ''}
+                    onChange={(e) => handleDriverChange(booking.id, e.target.value)}
+                    className="w-full text-xs font-semibold rounded-full px-2 py-1 border outline-none bg-gray-50 border-gray-200"
+                  >
+                    <option value="">Unassigned</option>
+                    {drivers.map(driver => (
+                      <option key={driver.id} value={driver.id}>
+                        {driver.name}
+                      </option>
+                    ))}
                   </select>
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">

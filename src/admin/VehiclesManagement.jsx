@@ -96,25 +96,44 @@ export default function VehiclesManagement() {
     setIsSubmitting(true);
 
     try {
+      let uploadedImageUrl = formData.imageUrl;
+
+      // Upload image if a file was selected
+      if (imageFile) {
+        try {
+          const fileName = `${Date.now()}_${imageFile.name}`;
+          const { error: uploadError } = await supabase.storage.from("vehicle-images").upload(fileName, imageFile);
+          if (uploadError) {
+            console.warn("Image upload failed (continuing without image):", uploadError.message);
+          } else {
+            const { data: publicUrlData } = supabase.storage.from("vehicle-images").getPublicUrl(fileName);
+            uploadedImageUrl = publicUrlData.publicUrl;
+          }
+        } catch (uploadErr) {
+          console.warn("Image upload failed (continuing without image):", uploadErr.message);
+        }
+      }
+
       const payload = {
         ...formData,
         price: Number(formData.price),
         capacity: Number(formData.capacity),
         origin: formData.origin,
         destination: formData.destination,
+        imageUrl: uploadedImageUrl,
       };
 
       if (editingId) {
-        await updateVehicle(editingId, payload, imageFile);
+        await updateVehicle(editingId, payload);
       } else {
-        await addVehicle(payload, imageFile);
+        await addVehicle(payload);
       }
 
       await fetchVehicles();
       resetForm();
     } catch (err) {
       console.error("Error saving vehicle:", err);
-      alert("Failed to save vehicle.");
+      alert(`Failed to save vehicle: ${err.message || err}`);
     } finally {
       setIsSubmitting(false);
     }

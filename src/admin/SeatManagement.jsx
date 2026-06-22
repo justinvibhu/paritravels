@@ -21,7 +21,10 @@ export function AdminSeatManagement() {
       try {
         const API_URL = import.meta.env.VITE_API_URL || '/api';
         const resp = await fetch(`${API_URL}/vehicles`);
-        if (!resp.ok) throw new Error('Failed to fetch vehicles');
+        if (!resp.ok) {
+          const errorBody = await resp.json().catch(() => ({ error: 'Failed to fetch vehicles' }));
+          throw new Error(errorBody.error || `Request failed with status ${resp.status}`);
+        }
         const data = await resp.json();
         setVehicles(data);
       } catch (err) {
@@ -85,6 +88,7 @@ export function AdminSeatManagement() {
       const API_URL = import.meta.env.VITE_API_URL || '/api';
       const payload = {
         vehicleId: Number(selectedVehicle),
+        bookingId: `ADMIN-${Date.now()}`,
         seatNumbers: [selectedSeatLabel],
         passengerName: passengerName || 'Manual Booking',
         travelDate: selectedDate,
