@@ -118,7 +118,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const resp = await fetch(`${API_URL}/admin/create-user`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password: pass, fullName: name, mobile })
+      // The admin `createUser` endpoint expects user_metadata to be in `options.data`
+      body: JSON.stringify({ 
+        email, 
+        password: pass, 
+        options: { data: { full_name: name, mobile } } 
+      })
     });
     if (!resp.ok) {
       const text = await resp.text();

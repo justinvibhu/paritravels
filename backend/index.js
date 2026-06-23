@@ -731,7 +731,7 @@ app.delete('/api/sponsors/:id', async (req, res, next) => {
 // Admin: create user (uses Service Role key, bypasses RLS)
 app.post('/api/admin/create-user', async (req, res, next) => {
   try {
-    const { email, password, fullName, mobile } = req.body;
+    const { email, password, options } = req.body;
     if (!email || !password) return res.status(400).json({ error: 'email and password are required' });
     // Optional admin secret check to prevent abuse in production
     const adminSecret = process.env.ADMIN_SECRET;
@@ -747,7 +747,7 @@ app.post('/api/admin/create-user', async (req, res, next) => {
       // Try to mark the user as confirmed so they can sign in immediately
       email_confirm: true,
       email_confirmed_at: new Date().toISOString(),
-      user_metadata: { full_name: fullName, mobile }
+      user_metadata: options?.data || {}
     });
     if (error) throw error;
 
@@ -755,9 +755,9 @@ app.post('/api/admin/create-user', async (req, res, next) => {
     try {
       const profileRow = {
         uid: data.user.id,
-        full_name: fullName,
+        full_name: options?.data?.full_name || '',
         email,
-        mobile,
+        mobile: options?.data?.mobile || null,
         role: 'customer',
         created_at: new Date().toISOString(),
       };

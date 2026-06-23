@@ -434,9 +434,11 @@ function HomePage({ navigate }: { navigate: (p: Page, params?: SearchFilters) =>
               <Search size={18} /> Search Available Vehicles
             </button>
             <div className="mt-4 text-center">
-              <Link to="/admin" className="inline-flex items-center justify-center gap-2 px-5 py-3 rounded-xl border border-white/20 text-sm font-semibold text-white hover:bg-white/10 transition">
-                <Shield size={16} /> Admin Panel
-              </Link>
+              {userData?.role === 'admin' && (
+                <Link to="/admin" className="inline-flex items-center justify-center gap-2 px-5 py-3 rounded-xl border border-white/20 text-sm font-semibold text-white hover:bg-white/10 transition">
+                  <Shield size={16} /> Admin Panel
+                </Link>
+              )}
             </div>
           </div>
 
