@@ -252,9 +252,21 @@ export const getTours = async () => {
 };
 
 export const getSponsors = async (activeOnly = false) => {
-  const response = await fetch(`${API_URL}/sponsors${activeOnly ? '?active=true' : ''}`);
-  if (!response.ok) throw new Error("Failed to fetch sponsors");
-  return response.json();
+  try {
+    const response = await fetch(`${API_URL}/sponsors${activeOnly ? '?active=true' : ''}`);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    return response.json();
+  } catch (err) {
+    console.warn('getSponsors: remote fetch failed, falling back to embedded sponsors.json', err);
+    try {
+      const local = await import('../data/sponsors.json');
+      const list = local?.default || local;
+      return activeOnly ? list.filter((s: any) => s.active) : list;
+    } catch (impErr) {
+      console.error('Failed to load local sponsors fallback', impErr);
+      throw err;
+    }
+  }
 };
 
 export const addSponsor = async (data: any) => {
