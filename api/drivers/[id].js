@@ -26,17 +26,32 @@ export default async (req, res) => {
 
   if (req.method === 'PUT') {
     try {
-      const { name, mobile, licenseNumber, experienceYears, status, imageUrl } = req.body;
+      const { name, phone, licenseNumber, experienceYears, status, imageUrl } = req.body;
+
+      const payload = {
+        name,
+        phone,
+        license_number: licenseNumber,
+        experience_years: experienceYears,
+        status,
+        image_url: imageUrl,
+      };
+
       const { data, error } = await supabase
         .from('drivers')
-        .update({ name, mobile, licenseNumber, experienceYears, status, imageUrl })
+        .update(payload)
         .eq('id', id)
         .select();
       if (error) throw error;
       if (!data || data.length === 0) return res.status(404).json({ error: 'Driver not found' });
       return res.status(200).json(keysToCamel(data[0]));
     } catch (error) {
-      return res.status(500).json({ error: error.message });
+      console.error(`DRIVER UPDATE ERROR (id: ${id}):`, error);
+      return res.status(500).json({
+        success: false,
+        message: error.message,
+        ...error,
+      });
     }
   } else if (req.method === 'DELETE') {
     try {
@@ -56,7 +71,12 @@ export default async (req, res) => {
       if (deleteError) throw deleteError;
       return res.status(200).json({ message: 'Driver deleted successfully' });
     } catch (error) {
-      return res.status(500).json({ error: error.message });
+      console.error(`DRIVER DELETE ERROR (id: ${id}):`, error);
+      return res.status(500).json({
+        success: false,
+        message: error.message,
+        ...error,
+      });
     }
   }
   return res.status(405).json({ error: 'Method not allowed' });

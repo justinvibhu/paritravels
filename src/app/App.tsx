@@ -46,6 +46,46 @@ const faqsData = [
   { q: "Do you provide airport transfers?", a: "Absolutely! We offer 24/7 airport transfer services with real-time flight tracking. Book at least 2 hours before your flight for guaranteed availability." },
 ];
 
+// ─── Seat Layout Generator ─────────────────────────────────────────────────────
+function getSeatLayout(category: string): Seat[][] {
+  const s = (id: string, label: string): Seat => ({ id, label, type: "seat", booked: false });
+  const driver: Seat = { id: "driver", label: "Driver", type: "driver" };
+
+  if (category === "sedan") {
+    return [
+      [driver, s("A1", "A1")],
+      [s("B1", "B1"), s("B2", "B2")],
+    ];
+  }
+  if (category === "suv") {
+    return [
+      [driver, s("A1", "A1")],
+      [s("B1", "B1"), s("B2", "B2")],
+      [s("C1", "C1"), s("C2", "C2")],
+      [s("D1", "D1"), s("D2", "D2")],
+    ];
+  }
+  if (category === "tempo") {
+    return [
+      [driver, s("A1", "A1"), s("A2", "A2"), s("A3", "A3")],
+      [s("B1", "B1"), s("B2", "B2"), s("B3", "B3"), s("B4", "B4")],
+      [s("C1", "C1"), s("C2", "C2"), s("C3", "C3"), s("C4", "C4")],
+      [s("D1", "D1"), s("D2", "D2"), s("D3", "D3"), s("D4", "D4")],
+    ];
+  }
+  // bus
+  return [
+    [driver, { id: "e1", label: "", type: "empty" }, { id: "e2", label: "", type: "empty" }, { id: "e3", label: "", type: "empty" }, { id: "e4", label: "", type: "empty" }],
+    [s("A1", "A1"), s("A2", "A2"), { id: "ai1", label: "", type: "aisle" }, s("A3", "A3"), s("A4", "A4")],
+    [s("B1", "B1"), s("B2", "B2"), { id: "ai2", label: "", type: "aisle" }, s("B3", "B3"), s("B4", "B4")],
+    [s("C1", "C1"), s("C2", "C2"), { id: "ai3", label: "", type: "aisle" }, s("C3", "C3"), s("C4", "C4")],
+    [s("D1", "D1"), s("D2", "D2"), { id: "ai4", label: "", type: "aisle" }, s("D3", "D3"), s("D4", "D4")],
+    [s("E1", "E1"), s("E2", "E2"), { id: "ai5", label: "", type: "aisle" }, s("E3", "E3"), s("E4", "E4")],
+    [s("F1", "F1"), s("F2", "F2"), { id: "ai6", label: "", type: "aisle" }, s("F3", "F3"), s("F4", "F4")],
+    [s("G1", "G1"), s("G2", "G2"), { id: "ai7", label: "", type: "aisle" }, s("G3", "G3"), s("G4", "G4")],
+  ];
+}
+
 // ─── Shared Components ─────────────────────────────────────────────────────────
 function Stars({ rating }: { rating: number }) {
   return (
@@ -1043,7 +1083,6 @@ function BookingFlowPage({ navigate, initialFrom, initialTo, initialDate }: { na
   const [selectedVehicle, setSelectedVehicle] = useState<VehicleItem | null>(null);
   const [selectedSeats, setSelectedSeats] = useState<string[]>([]);
   const [bookedSeatLabels, setBookedSeatLabels] = useState<Set<string>>(new Set());
-  const [seatLayout, setSeatLayout] = useState<Seat[][]>([]);
   const [seatLoading, setSeatLoading] = useState(false);
   const [seatError, setSeatError] = useState<string | null>(null);
   const [passengers, setPassengers] = useState([{ name: "Priya Sharma", age: "28", gender: "female" }]);
@@ -1116,7 +1155,6 @@ function BookingFlowPage({ navigate, initialFrom, initialTo, initialDate }: { na
         }
 
         const data = await response.json();
-        setSeatLayout(data.layout || []);
         const labels = new Set<string>();
 
         if (Array.isArray(data.bookedSeats)) {
@@ -1151,6 +1189,8 @@ function BookingFlowPage({ navigate, initialFrom, initialTo, initialDate }: { na
     }
   }, [bookedSeatLabels, selectedSeats]);
 
+  const vehLayout = selectedVehicle ? getSeatLayout(selectedVehicle.category) : getSeatLayout("suv");
+
   const totalFare = selectedVehicle ? selectedVehicle.price + selectedSeats.length * 200 : 0;
 
   const handleConfirmBooking = async () => {
@@ -1169,26 +1209,6 @@ function BookingFlowPage({ navigate, initialFrom, initialTo, initialDate }: { na
     try {
       const API_URL = import.meta.env.VITE_API_URL || "/api";
       
-      // Validate seats are still available (race condition prevention)
-      const validationResponse = await fetch(`${API_URL}/validate-seats`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          vehicleId: selectedVehicle.id,
-          seatLabels: selectedSeats,
-          date: date,
-        }),
-      });
-
-      if (!validationResponse.ok) {
-        const validationError = await validationResponse.json();
-        alert(`Cannot complete booking: ${validationError.message || 'Seats no longer available'}`);
-        // Refresh seat availability
-        fetchBookedSeats();
-        setIsCreating(false);
-        return;
-      }
-
       // First, create the booking
       const savedBookingId = await createBooking({
         userId: currentUser.id,
@@ -1384,7 +1404,7 @@ function BookingFlowPage({ navigate, initialFrom, initialTo, initialDate }: { na
                   </span>
                 </div>
                 {seatError && <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{seatError}</div>}
-                <SeatMap layout={seatLayout} selected={selectedSeats} onToggle={toggleSeat} booked={bookedSeatLabels} />
+                <SeatMap layout={vehLayout} selected={selectedSeats} onToggle={toggleSeat} booked={bookedSeatLabels} />
               </div>
               <div className="lg:col-span-2 space-y-4">
                 <div className="bg-blue-50 rounded-2xl p-4">

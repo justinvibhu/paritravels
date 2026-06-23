@@ -530,23 +530,28 @@ app.get('/api/drivers', async (req, res, next) => {
 // Add a new driver
 app.post('/api/drivers', async (req, res, next) => {
   try {
-    const { name, licenseNumber, phone, experienceYears, status, imageUrl } = req.body;
+    console.log('--- Handling POST /api/drivers ---');
+    console.log('Request Body:', req.body);
+
+    const { name, licenseNumber, phone, experienceYears, status } = req.body;
     
-    // Build minimal payload with only basic fields (adjust based on actual schema)
+    // --- Validation ---
+    if (!name || !licenseNumber || !phone) {
+      return res.status(400).json({ error: 'Name, license number, and phone are required.' });
+    }
+
     const payload = {
-      name,
+      name, // This is the correct column name
       license_number: licenseNumber,
-      phone,
+      phone, // This is the correct column name
       status: status || 'available',
+      // Use experienceYears from request, default to 0 if not provided
+      experience_years: (experienceYears !== undefined && experienceYears !== null) ? Number(experienceYears) : 0,
+      // image_url will be null if upload fails, or the URL if it succeeds
+      image_url: req.body.imageUrl || null,
     };
-    
-    // Only add optional fields if they exist and have values
-    if (experienceYears !== undefined && experienceYears !== null) {
-      payload.experience_years = Number(experienceYears);
-    }
-    if (imageUrl !== undefined && imageUrl !== null) {
-      payload.image_url = imageUrl;
-    }
+
+    console.log('Inserting driver with payload:', payload);
     
     const { data, error } = await supabase
       .from('drivers')
@@ -554,7 +559,12 @@ app.post('/api/drivers', async (req, res, next) => {
       .select();
 
     if (error) {
-      console.error('Driver insert error:', error);
+      // Log the detailed Supabase error
+      console.error('Supabase driver insert error:', { code: error.code, message: error.message, details: error.details });
+      // Provide a more specific error message if it's a unique constraint violation
+      if (error.code === '23505') { // unique_violation
+        return res.status(409).json({ error: 'A driver with this license number already exists.' });
+      }
       throw error;
     }
     if (!data || data.length === 0) throw new Error('Driver created but could not be retrieved.');
@@ -569,20 +579,24 @@ app.post('/api/drivers', async (req, res, next) => {
 app.put('/api/drivers/:id', async (req, res, next) => {
   try {
     const { id } = req.params;
-    const { name, licenseNumber, phone, experienceYears, status, imageUrl } = req.body;
+    const { name, licenseNumber, phone, experienceYears, status, imageUrl, experience } = req.body;
 
-    // Build minimal payload with only basic fields
-    const payload = {
-      name,
-      license_number: licenseNumber,
-      phone,
-      status: status || 'available',
-    };
-    
-    // Only add optional fields if they exist and have values
-    if (experienceYears !== undefined && experienceYears !== null) {
-      payload.experience_years = Number(experienceYears);
+    // --- Validation ---
+    if (!name || !licenseNumber || !phone) {
+      return res.status(400).json({ error: 'Name, license number, and phone are required.' });
     }
+
+    const payload = {
+      name, // This is the correct column name
+      license_number: licenseNumber,
+      phone, // This is the correct column name
+      status: status || 'available',
+      // Handle both 'experience' and 'experienceYears' for compatibility
+      experience_years: (experienceYears !== undefined && experienceYears !== null) ? Number(experienceYears) : Number(experience || 0),
+    };
+
+    // Only include imageUrl in the payload if it's explicitly provided in the request.
+    // This prevents accidentally nullifying it on updates where the image isn't changed.
     if (imageUrl !== undefined && imageUrl !== null) {
       payload.image_url = imageUrl;
     }
@@ -593,7 +607,13 @@ app.put('/api/drivers/:id', async (req, res, next) => {
       .eq('id', id)
       .select();
 
-    if (error) throw error;
+    if (error) {
+      console.error('Supabase driver update error:', { code: error.code, message: error.message, details: error.details });
+      if (error.code === '23505') {
+        return res.status(409).json({ error: 'A driver with this license number already exists.' });
+      }
+      throw error;
+    }
     if (!data || data.length === 0) return res.status(404).json({ error: 'Driver not found' });
     
     res.json(keysToCamel(data[0]));

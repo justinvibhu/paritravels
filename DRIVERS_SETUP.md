@@ -6,22 +6,23 @@ Run this SQL in your Supabase SQL Editor to create the drivers table:
 
 ```sql
 -- Create drivers table if it doesn't exist
-CREATE TABLE IF NOT EXISTS drivers (
-  id BIGINT PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
-  name VARCHAR(255) NOT NULL,
-  license_number VARCHAR(50) UNIQUE NOT NULL,
-  phone VARCHAR(20),
-  status VARCHAR(50) DEFAULT 'available',
-  created_at TIMESTAMP DEFAULT NOW(),
-  updated_at TIMESTAMP DEFAULT NOW()
+-- Drop the table if it exists to ensure a clean setup with the correct schema.
+-- WARNING: This will delete all existing data in the drivers table.
+DROP TABLE IF EXISTS public.drivers;
+
+CREATE TABLE public.drivers (
+  id bigint PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
+  name text NOT NULL,
+  phone text,
+  license_number text UNIQUE NOT NULL,
+  experience_years integer,
+  status text DEFAULT 'available'::text,
+  image_url text,
+  created_at timestamp with time zone DEFAULT now()
 );
 
 -- Create index for faster queries
 CREATE INDEX IF NOT EXISTS idx_drivers_status ON drivers(status);
-
--- Add optional columns if you want
--- ALTER TABLE drivers ADD COLUMN IF NOT EXISTS experience_years INT;
--- ALTER TABLE drivers ADD COLUMN IF NOT EXISTS image_url TEXT;
 ```
 
 ## Columns Description

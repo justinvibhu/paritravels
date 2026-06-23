@@ -24,23 +24,58 @@ const keysToCamel = (o) => {
 export default async (req, res) => {
   if (req.method === 'GET') {
     try {
-      const { data, error } = await supabase.from('drivers').select('*');
+      const { data, error } = await supabase
+        .from('drivers')
+        .select('*')
+        .order('created_at', { ascending: false });
       if (error) throw error;
       return res.status(200).json(keysToCamel(data));
     } catch (error) {
-      return res.status(500).json({ error: error.message });
+      console.error('DRIVER GET ERROR:', error);
+      return res.status(500).json({
+        success: false,
+        message: error.message,
+        code: error.code,
+        details: error.details,
+        hint: error.hint,
+      });
     }
   } else if (req.method === 'POST') {
     try {
-      const { name, mobile, licenseNumber, experienceYears, status, imageUrl } = req.body;
+      const { name, phone, licenseNumber, experienceYears, status, imageUrl } = req.body;
+
+      const payload = {
+        name,
+        phone,
+        license_number: licenseNumber,
+        experience_years: experienceYears,
+        status,
+        image_url: imageUrl,
+      };
+
+      console.log('REQUEST BODY:', req.body);
+      console.log('FINAL PAYLOAD:', payload);
+
       const { data, error } = await supabase
         .from('drivers')
-        .insert([{ name, mobile, licenseNumber, experienceYears, status, imageUrl }])
-        .select();
-      if (error) throw error;
+        .insert([payload])
+        .select()
+        .single();
+
+      if (error) {
+        console.error('SUPABASE INSERT ERROR:', error);
+        throw error;
+      }
       return res.status(201).json(keysToCamel(data[0]));
     } catch (error) {
-      return res.status(500).json({ error: error.message });
+      console.error('DRIVER CREATE ERROR:', error);
+      return res.status(500).json({
+        success: false,
+        message: error.message,
+        code: error.code,
+        details: error.details,
+        hint: error.hint,
+      });
     }
   }
   return res.status(405).json({ error: 'Method not allowed' });
