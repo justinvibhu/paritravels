@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { getVehicles, addVehicle, updateVehicle, deleteVehicle } from "../supabase/db";
+import { getDrivers } from "../supabase/db";
 
 export default function VehiclesManagement() {
   const [vehicles, setVehicles] = useState([]);
@@ -10,6 +11,7 @@ export default function VehiclesManagement() {
   const [editingId, setEditingId] = useState(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [imageFile, setImageFile] = useState(null);
+  const [drivers, setDrivers] = useState([]);
 
   const initialFormState = {
     name: "",
@@ -23,12 +25,21 @@ export default function VehiclesManagement() {
     ac: true,
     status: "active",
     imageUrl: "",
+    driverId: '',
   };
 
   const [formData, setFormData] = useState(initialFormState);
 
   useEffect(() => {
     fetchVehicles();
+    (async () => {
+      try {
+        const d = await getDrivers();
+        setDrivers(d || []);
+      } catch (e) {
+        console.error('Failed to load drivers', e);
+      }
+    })();
   }, []);
 
   const fetchVehicles = async () => {
@@ -73,6 +84,7 @@ export default function VehiclesManagement() {
       ac: vehicle.ac !== undefined ? vehicle.ac : true,
       status: vehicle.status || "active",
       imageUrl: vehicle.imageUrl || vehicle.image_url,
+      driverId: vehicle.driverId || vehicle.driver_id || '',
     });
     setEditingId(vehicle.id);
     setImageFile(null);
@@ -121,6 +133,7 @@ export default function VehiclesManagement() {
         origin: formData.origin,
         destination: formData.destination,
         imageUrl: uploadedImageUrl,
+        driverId: formData.driverId === '' ? null : Number(formData.driverId),
       };
 
       if (editingId) {
@@ -163,6 +176,13 @@ export default function VehiclesManagement() {
             <div><label className="block text-sm font-medium text-gray-700 mb-1">Price Per Day (₹)</label><input type="number" name="price" value={formData.price} onChange={handleInputChange} required min="0" className="w-full border border-gray-300 rounded-md p-2" /></div>
             <div><label className="block text-sm font-medium text-gray-700 mb-1">Origin</label><input type="text" name="origin" value={formData.origin} onChange={handleInputChange} className="w-full border border-gray-300 rounded-md p-2" placeholder="e.g., Mumbai" /></div>
             <div><label className="block text-sm font-medium text-gray-700 mb-1">Destination</label><input type="text" name="destination" value={formData.destination} onChange={handleInputChange} className="w-full border border-gray-300 rounded-md p-2" placeholder="e.g., Pune" /></div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Assign Driver</label>
+              <select name="driverId" value={formData.driverId} onChange={handleInputChange} className="w-full border border-gray-300 rounded-md p-2 bg-white">
+                <option value="">Unassigned</option>
+                {drivers.map(d => (<option key={d.id} value={d.id}>{d.name} {d.phone ? `(${d.phone})` : ''}</option>))}
+              </select>
+            </div>
             <div><label className="block text-sm font-medium text-gray-700 mb-1">Status</label><select name="status" value={formData.status} onChange={handleInputChange} className="w-full border border-gray-300 rounded-md p-2 bg-white"><option value="active">Active</option><option value="inactive">Inactive</option><option value="maintenance">Maintenance</option></select></div>
             <div className="md:col-span-2"><label className="block text-sm font-medium text-gray-700 mb-1">Vehicle Image</label><input type="file" accept="image/*" onChange={(e) => setImageFile(e.target.files[0])} className="w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100" />{editingId && formData.imageUrl && !imageFile && <p className="text-xs text-gray-500 mt-1">Leave empty to keep current image.</p>}</div>
             <div className="md:col-span-2 flex items-center mt-2"><input type="checkbox" name="ac" checked={formData.ac} onChange={handleInputChange} id="vehicle-ac" className="h-4 w-4 text-blue-600 border-gray-300 rounded" /><label htmlFor="vehicle-ac" className="ml-2 block text-sm text-gray-900">Air Conditioned (AC)</label></div>
@@ -182,7 +202,8 @@ export default function VehiclesManagement() {
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Route</th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Category</th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Price/Day</th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Driver</th>
               <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
             </tr>
           </thead>
@@ -202,6 +223,7 @@ export default function VehiclesManagement() {
                 <td className="px-6 py-4 whitespace-nowrap">
                   <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${v.status === 'active' ? 'bg-green-100 text-green-800' : v.status === 'maintenance' ? 'bg-amber-100 text-amber-800' : 'bg-gray-100 text-gray-800'}`}>{v.status || "Active"}</span>
                 </td>
+                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">{(drivers.find(d => d.id === v.driverId || d.id === v.driver_id) || {}).name || 'Unassigned'}</td>
                 <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                   <button onClick={() => handleEdit(v)} className="text-blue-600 hover:text-blue-900 mr-4">Edit</button>
                   <button onClick={() => handleDelete(v.id)} className="text-red-600 hover:text-red-900">Delete</button>

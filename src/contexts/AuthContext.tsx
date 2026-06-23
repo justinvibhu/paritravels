@@ -62,12 +62,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const fetchUserData = async (userId: string) => {
     try {
+      // prefer maybeSingle to avoid an error when no row exists
       const { data, error } = await supabase
         .from('users')
         .select('uid, full_name, email, mobile, role, created_at')
         .eq('uid', userId)
-        .single();
+        .maybeSingle();
+
       if (error) {
+        // Log but don't throw — handle missing user gracefully
         console.error('fetchUserData supabase error:', error);
         setUserData(null);
         setLoading(false);
@@ -97,17 +100,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const login = async (email: string, pass: string) => {
-    const { error } = await supabase.auth.signInWithPassword({ email, password: pass });
+    const { data: signInData, error } = await supabase.auth.signInWithPassword({ email, password: pass });
     if (error) throw error;
-    
-    const session = await supabase.auth.getSession();
-    const userId = session.data.session?.user.id;
-    if (!userId) return null;
-    
-    const { data, error: userError } = await supabase.from('users').select('*').eq('uid', userId).single();
-    if (!userError && data) {
-      setUserData(data as UserProfile);
-      return data as UserProfile;
+    if (signInData.user) {
+      const { data, error: userError } = await supabase.from('users').select('*').eq('uid', signInData.user.id).single();
+      if (!userError && data) {
+        return data as UserProfile;
+      }
     }
     return null;
   };
@@ -143,5 +142,5 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await supabase.auth.signOut();
   };
 
-  return <AuthContext.Provider value={{ currentUser, userData, loading, login, register, loginWithGoogle, logout }}>{!loading && children}</AuthContext.Provider>;
+  return <AuthContext.Provider value={{ currentUser, userData, loading, login, register, loginWithGoogle, logout }}>{children}</AuthContext.Provider>;
 }

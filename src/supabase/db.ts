@@ -85,14 +85,60 @@ export const updateSeatStatus = async (vehicleId: string, seatId: string, status
 export const createBooking = async (data: any) => {
   const bookingId = "PT" + Date.now().toString().slice(-8);
   try {
-    const { data: newDoc, error } = await supabase.from('bookings').insert([
-      { ...data, bookingId, bookingStatus: "Confirmed", paymentStatus: "Pending" }
-    ]).select().single();
+    // Build a whitelist payload so we only send known DB columns
+    const insertPayload: any = {
+      bookingId,
+      bookingStatus: "Confirmed",
+      paymentStatus: "Pending",
+      user_id: data.userId || data.user_id,
+      user_email: data.userEmail || data.user_email,
+      customer_name: data.customerName || data.customer_name,
+      origin: data.origin,
+      destination: data.destination,
+      route: data.route,
+      travel_date: data.travelDate || data.date || data.travel_date,
+      vehicle_id: data.vehicleId || data.vehicle_id,
+      vehicle_name: data.vehicleName || data.vehicle_name,
+      vehicle_number: data.vehicleNumber || data.vehicle_number,
+      seat_numbers: data.seatNumbers || data.seat_numbers,
+      passengers: data.passengers,
+      amount: data.amount || data.totalPrice,
+      payment_method: data.paymentMethod || data.payment_method,
+      created_at: new Date().toISOString(),
+    };
+
+    const { data: newDoc, error } = await supabase.from('bookings').insert([insertPayload]).select().single();
     if (error) {
       console.error("Supabase error:", error);
-      // Fallback: Create booking in localStorage for demo mode
+      // If PostgREST reports missing columns, attempt a minimal retry without optional fields
+      if (error.code === 'PGRST204' || (typeof error.message === 'string' && error.message.includes('Could not find the'))) {
+        const minimalPayload: any = {
+          bookingId,
+          bookingStatus: "Confirmed",
+          paymentStatus: "Pending",
+          user_id: insertPayload.user_id,
+          travel_date: insertPayload.travel_date,
+          vehicle_id: insertPayload.vehicle_id,
+          seat_numbers: insertPayload.seat_numbers,
+          amount: insertPayload.amount,
+          created_at: insertPayload.created_at,
+        };
+        try {
+          const { data: retryDoc, error: retryErr } = await supabase.from('bookings').insert([minimalPayload]).select().single();
+          if (!retryErr) return bookingId;
+          console.error('Retry insert also failed:', retryErr);
+        } catch (retryCatch) {
+          console.error('Retry insert threw:', retryCatch);
+        }
+      }
+
+      // Fallback: persist booking locally for demo/offline mode
       const booking = { ...data, bookingId, bookingStatus: "Confirmed", paymentStatus: "Pending", createdAt: new Date().toISOString() };
-      localStorage.setItem(`booking_${bookingId}`, JSON.stringify(booking));
+      try {
+        localStorage.setItem(`booking_${bookingId}`, JSON.stringify(booking));
+      } catch (lsErr) {
+        console.error('Failed to write booking to localStorage:', lsErr);
+      }
       return bookingId;
     }
     return bookingId;
@@ -346,4 +392,47 @@ export const getUserNotifications = async (userId: string) => {
 export const markNotificationRead = async (id: string) => {
   const { error } = await supabase.from('notifications').update({ read: true }).eq('id', id);
   if (error) throw error;
+};
+
+// --- TOUR BOOKINGS ---
+export const createTourBooking = async (data: any) => {
+  const response = await fetch(`${API_URL}/tour-bookings`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data)
+  });
+  if (!response.ok) {
+    const errData = await response.json().catch(() => ({}));
+    throw new Error(errData.error || "Failed to create tour booking");
+  }
+  return response.json();
+};
+
+export const getTourBookings = async () => {
+  const response = await fetch(`${API_URL}/tour-bookings`);
+  if (!response.ok) throw new Error("Failed to fetch tour bookings");
+  return response.json();
+};
+
+export const getTourBooking = async (bookingId: string) => {
+  const response = await fetch(`${API_URL}/tour-bookings/${bookingId}`);
+  if (!response.ok) throw new Error("Failed to fetch tour booking");
+  return response.json();
+};
+
+export const updateTourBooking = async (bookingId: string, data: any) => {
+  const response = await fetch(`${API_URL}/tour-bookings/${bookingId}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data)
+  });
+  if (!response.ok) throw new Error("Failed to update tour booking");
+  return response.json();
+};
+
+export const deleteTourBooking = async (bookingId: string) => {
+  const response = await fetch(`${API_URL}/tour-bookings/${bookingId}`, {
+    method: "DELETE"
+  });
+  if (!response.ok) throw new Error("Failed to delete tour booking");
 };

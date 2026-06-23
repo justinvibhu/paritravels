@@ -15,25 +15,25 @@ import "./styles/index.css";
 import { AuthProvider } from "./contexts/AuthContext.tsx";
 
   createRoot(document.getElementById("root")!).render(
-    <AuthProvider>
     <BrowserRouter>
-      <Routes>
-        {/* Main frontend application */}
-        <Route path="/*" element={<App />} />
-        
-        {/* Admin Dashboard application */}
-        <Route path="/admin" element={<AdminLayout />}>
-          <Route index element={<Dashboard />} />
-          <Route path="bookings" element={<BookingsManagement />} />
-          <Route path="customers" element={<CustomersManagement />} />
-          <Route path="drivers" element={<DriversManagement />} />
-          <Route path="tours" element={<ToursManagement />} />
-          <Route path="vehicles" element={<VehiclesManagement />} />
-          <Route path="sponsors" element={<SponsorsManagement />} />
-          <Route path="seats" element={<AdminSeatManagement />} />
-        </Route>
-      </Routes>
+      <AuthProvider>
+        <Routes>
+          {/* Main frontend application */}
+          <Route path="/*" element={<App />} />
+          
+          {/* Admin Dashboard application */}
+          <Route path="/admin" element={<AdminLayout />}>
+            <Route index element={<Dashboard />} />
+            <Route path="bookings" element={<BookingsManagement />} />
+            <Route path="customers" element={<CustomersManagement />} />
+            <Route path="drivers" element={<DriversManagement />} />
+            <Route path="tours" element={<ToursManagement />} />
+            <Route path="vehicles" element={<VehiclesManagement />} />
+            <Route path="sponsors" element={<SponsorsManagement />} />
+            <Route path="seats" element={<AdminSeatManagement />} />
+          </Route>
+        </Routes>
+      </AuthProvider>
     </BrowserRouter>
-    </AuthProvider>
   );
   

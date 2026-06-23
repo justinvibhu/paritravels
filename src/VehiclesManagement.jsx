@@ -5,6 +5,7 @@ const API_URL = import.meta.env.VITE_API_URL || '/api';
 
 export default function VehiclesManagement() {
   const [vehicles, setVehicles] = useState([]);
+  const [drivers, setDrivers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
@@ -27,6 +28,7 @@ export default function VehiclesManagement() {
     features: "AC, GPS, Music System",
     rating: 5.0,
     reviews: 0,
+    driverId: '',
   };
 
   const [formData, setFormData] = useState(initialFormState);
@@ -51,6 +53,18 @@ export default function VehiclesManagement() {
 
   useEffect(() => {
     fetchVehicles();
+    // fetch drivers for assignment dropdown
+    const fetchDrivers = async () => {
+      try {
+        const resp = await fetch(`${API_URL}/drivers`);
+        if (!resp.ok) throw new Error('Failed to load drivers');
+        const data = await resp.json();
+        setDrivers(data || []);
+      } catch (e) {
+        console.error('Error fetching drivers', e);
+      }
+    };
+    fetchDrivers();
   }, [fetchVehicles]);
 
   const handleInputChange = (e) => {
@@ -86,6 +100,7 @@ export default function VehiclesManagement() {
       features: Array.isArray(vehicle.features) ? vehicle.features.join(", ") : (vehicle.features || ""),
       rating: vehicle.rating || 5.0,
       reviews: vehicle.reviews || 0,
+      driverId: vehicle.driverId || vehicle.driver_id || '',
     });
     setEditingId(vehicle.id);
     setIsFormOpen(true);
@@ -146,6 +161,7 @@ export default function VehiclesManagement() {
         features: typeof formData.features === 'string' ? formData.features.split(',').map(f => f.trim()).filter(Boolean) : formData.features,
         rating: Number(formData.rating),
         reviews: Number(formData.reviews),
+        driverId: formData.driverId === '' ? null : Number(formData.driverId),
       };
 
       const url = editingId
@@ -314,6 +330,21 @@ export default function VehiclesManagement() {
             </div>
 
             <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Assign Driver</label>
+              <select
+                name="driverId"
+                value={formData.driverId}
+                onChange={handleInputChange}
+                className="w-full border border-gray-300 rounded-md p-2 focus:ring-blue-500 focus:border-blue-500"
+              >
+                <option value="">Unassigned</option>
+                {drivers.map((d) => (
+                  <option key={d.id} value={d.id}>{d.name} {d.phone ? `(${d.phone})` : ''}</option>
+                ))}
+              </select>
+            </div>
+
+            <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">AC Available</label>
               <select
                 name="ac"
@@ -370,6 +401,7 @@ export default function VehiclesManagement() {
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Type / Capacity</th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Price / Day</th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Driver</th>
               <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
             </tr>
           </thead>
@@ -394,6 +426,7 @@ export default function VehiclesManagement() {
                     {vehicle.status}
                   </span>
                 </td>
+                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">{(drivers.find(d => d.id === vehicle.driverId || d.id === vehicle.driver_id) || {}).name || 'Unassigned'}</td>
                 <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                   <button onClick={() => handleEdit(vehicle)} className="text-blue-600 hover:text-blue-900 mr-4">Edit</button>
                   <button onClick={() => handleDelete(vehicle.id)} className="text-red-600 hover:text-red-900">Delete</button>

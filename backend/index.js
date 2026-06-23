@@ -66,6 +66,50 @@ const keysToCamel = (o) => {
   return o;
 };
 
+// Middleware to protect admin routes
+const protectAdminRoute = async (req, res, next) => {
+  try {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return res.status(401).json({ error: 'Unauthorized: No token provided' });
+    }
+
+    const token = authHeader.split(' ')[1];
+    
+    // Use supabase.auth.getUser() to verify the token and fetch user data.
+    // This performs a network request to the Supabase Auth server for validation.
+    const { data: userResponse, error: authError } = await supabase.auth.getUser(token);
+
+    if (authError || !userResponse?.user) {
+      console.error('Auth check failed:', authError?.message || 'User not found');
+      return res.status(401).json({ error: 'Unauthorized: Invalid token' });
+    }
+
+    const userId = userResponse.user.id;
+
+    // Fetch user profile from your 'users' table to get the role
+    const { data: userProfile, error: profileError } = await supabase
+      .from('users')
+      .select('role')
+      .eq('uid', userId)
+      .single();
+
+    if (profileError || !userProfile) {
+      console.error('Failed to fetch user profile for role check:', profileError?.message);
+      return res.status(403).json({ error: 'Forbidden: User profile not found or access denied' });
+    }
+
+    if (userProfile.role !== 'admin') {
+      return res.status(403).json({ error: 'Forbidden: Not an admin' });
+    }
+    req.user = userResponse.user; // Attach user data to the request for downstream handlers
+    next(); // User is an admin, proceed to the route handler
+  } catch (error) {
+    console.error('Error in protectAdminRoute middleware:', error);
+    return res.status(500).json({ error: 'Internal Server Error during authentication' });
+  }
+};
+
 const normalizeSeatLabel = (label) => {
   if (label === null || label === undefined) return '';
   return String(label).trim().toUpperCase();
@@ -236,7 +280,7 @@ app.get('/api/vehicles/:id', async (req, res, next) => {
 });
 
 const buildVehiclePayloads = (body) => {
-  const { name, vehicleNumber, vehicle_number, type, capacity, pricePerDay, price, status, imageUrl, image_url, category, ac, features, rating, reviews, origin, destination } = body;
+  const { name, vehicleNumber, vehicle_number, type, capacity, pricePerDay, price, status, imageUrl, image_url, category, ac, features, rating, reviews, origin, destination, driverId, driver_id } = body;
   const vehicleNo = vehicleNumber || vehicle_number;
   const resolvedImage = imageUrl || image_url;
   const resolvedPrice = pricePerDay || price;
@@ -256,6 +300,7 @@ const buildVehiclePayloads = (body) => {
     features,
     rating,
     reviews,
+    driverId: driverId !== undefined ? (driverId === '' ? null : Number(driverId)) : (driver_id !== undefined ? (driver_id === '' ? null : Number(driver_id)) : undefined),
     origin,
     destination,
     seatLabels: body.seatLabels || body.seat_labels || [],
@@ -274,6 +319,7 @@ const buildVehiclePayloads = (body) => {
     features,
     rating,
     reviews,
+    driver_id: driver_id !== undefined ? (driver_id === '' ? null : Number(driver_id)) : (driverId !== undefined ? (driverId === '' ? null : Number(driverId)) : undefined),
     origin,
     destination,
     seat_labels: body.seatLabels || body.seat_labels || [],
@@ -521,6 +567,22 @@ app.get('/api/drivers', async (req, res, next) => {
       .order('created_at', { ascending: false });
 
     if (error) throw error;
+    res.json(keysToCamel(data));
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Get a single driver by ID
+app.get('/api/drivers/:id', async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { data, error } = await supabase.from('drivers').select('*').eq('id', id).single();
+
+    if (error) {
+      if (error.code === 'PGRST116') return res.status(404).json({ error: 'Driver not found' });
+      throw error;
+    }
     res.json(keysToCamel(data));
   } catch (error) {
     next(error);
@@ -878,6 +940,159 @@ app.put('/api/bookings/:id', async (req, res, next) => {
 
 // Delete a booking
 app.delete('/api/bookings/:id', async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    let query = supabase.from('bookings').delete();
+
+    if (/^\d+$/.test(id)) {
+      query = query.eq('id', Number(id));
+    } else {
+      query = query.eq('booking_id', id);
+    }
+
+    const { error } = await query;
+
+    if (error) throw error;
+    res.status(204).send();
+  } catch (error) {
+    next(error);
+  }
+});
+
+// --- TOUR BOOKINGS API ---
+
+// Get all tour bookings
+app.get('/api/tour-bookings', async (req, res, next) => {
+  try {
+    const { data, error } = await supabase
+      .from('bookings')
+      .select('*')
+      .eq('booking_type', 'tour');
+    
+    if (error) throw error;
+    res.json(keysToCamel(data));
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Get a single tour booking by ID
+app.get('/api/tour-bookings/:id', async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    let query = supabase.from('bookings').select('*').eq('booking_type', 'tour');
+
+    if (/^\d+$/.test(id)) {
+      query = query.eq('id', Number(id));
+    } else {
+      query = query.eq('booking_id', id);
+    }
+
+    const { data, error } = await query.single();
+
+    if (error) {
+      if (error.code === 'PGRST116') return res.status(404).json({ error: 'Tour booking not found' });
+      throw error;
+    }
+    res.json(keysToCamel(data));
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Create a new tour booking
+app.post('/api/tour-bookings', async (req, res, next) => {
+  try {
+    const {
+      tourId,
+      tourName,
+      customerName,
+      email,
+      phone,
+      passengers,
+      startDate,
+      duration,
+      amount,
+      pricePerPerson,
+      specialRequests,
+      bookingType,
+      paymentStatus,
+      bookingStatus,
+      destination,
+      origin,
+    } = req.body;
+
+    // Validation
+    if (!tourId || !tourName || !customerName || !email || !phone || !passengers || !startDate) {
+      return res.status(400).json({ error: 'Missing required tour booking fields' });
+    }
+
+    const payload = {
+      booking_type: 'tour',
+      tour_id: Number(tourId),
+      tour_name: tourName,
+      customer_name: customerName,
+      email,
+      phone,
+      passengers: Number(passengers),
+      travel_date: startDate,
+      origin: origin || 'Online',
+      destination: destination || tourName || null,
+      amount: Number(amount),
+      price_per_person: Number(pricePerPerson),
+      special_requests: specialRequests || null,
+      payment_status: paymentStatus || 'Pending',
+      booking_status: bookingStatus || 'Confirmed',
+    };
+
+    const { data, error } = await supabase
+      .from('bookings')
+      .insert([payload])
+      .select();
+
+    if (error) throw error;
+    if (!data || data.length === 0) throw new Error('Tour booking created but could not be retrieved.');
+
+    const createdBooking = keysToCamel(data[0]);
+    res.status(201).json(createdBooking);
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Update a tour booking
+app.put('/api/tour-bookings/:id', async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { bookingStatus, paymentStatus, specialRequests, driverId } = req.body;
+
+    const updatePayload = {};
+    if (bookingStatus) updatePayload.booking_status = bookingStatus;
+    if (paymentStatus) updatePayload.payment_status = paymentStatus;
+    if (specialRequests !== undefined) updatePayload.special_requests = specialRequests;
+    if (driverId !== undefined) updatePayload.driver_id = driverId;
+
+    let query = supabase.from('bookings').update(updatePayload);
+
+    if (/^\d+$/.test(id)) {
+      query = query.eq('id', Number(id));
+    } else {
+      query = query.eq('booking_id', id);
+    }
+
+    const { data, error } = await query.select();
+
+    if (error) throw error;
+    if (!data || data.length === 0) return res.status(404).json({ error: 'Tour booking not found' });
+
+    res.json(keysToCamel(data[0]));
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Delete a tour booking
+app.delete('/api/tour-bookings/:id', async (req, res, next) => {
   try {
     const { id } = req.params;
     let query = supabase.from('bookings').delete();

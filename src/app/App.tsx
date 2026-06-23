@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { useEffect, useState, useRef } from "react";
+import { Link, Route, Routes, useLocation, useNavigate } from "react-router-dom";
+import BookingSuccessPage from "../BookingSuccessPage";
 import {
   MapPin, Calendar, Users, Car, Search, Star, ChevronDown, ChevronUp,
   Menu, X, Phone, Mail, ArrowRight, ArrowLeft, Check, CreditCard,
@@ -9,16 +10,16 @@ import {
   Wallet, Smartphone, FileText, Trash2, CheckCircle, XCircle,
   TrendingUp, Shield, Filter, Clock, Globe, Plus, Minus, Eye, Pencil
 } from "lucide-react";
+import html2canvas from 'html2canvas';
+import jsPDF from 'jspdf';
+import { QRCodeSVG as QRCode } from 'qrcode.react';
 import {
   AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid,
   Tooltip, ResponsiveContainer, PieChart, Pie, Cell
 } from "recharts";
 import { useAuth } from "../contexts/AuthContext.tsx";
 import { createBooking, getUserBookings, getVehicles, getTours, getSponsors } from "../supabase/db";
-
-// ─── Types ────────────────────────────────────────────────────────────────────
-type Page = "home" | "login" | "register" | "forgot" | "vehicles" | "booking" | "tours" | "dashboard" | "admin";
-type Seat = { id: string; label: string; type: "driver" | "seat" | "aisle" | "empty"; booked?: boolean };
+import TourBookingPage from "../TourBookingPage";
 type VehicleItem = { id: string | number; name: string; type: string; capacity: number; price: number; ac: boolean; img: string; features: string[]; rating: number; reviews: number; category: string; imageUrl?: string; vehicleNumber?: string };
 type SearchFilters = { from?: string; to?: string; date?: string; returnDate?: string; passengers?: number; vehicleType?: string };
 type DriverItem = { id: string; name: string; phone?: string; licenseNumber?: string; experienceYears?: number; status?: string; imageUrl?: string };
@@ -29,6 +30,10 @@ const formatCurrency = (value: number) =>
     currency: "INR",
     maximumFractionDigits: 0,
   }).format(value);
+
+// ─── Types ────────────────────────────────────────────────────────────────────
+type Page = "home" | "login" | "register" | "forgot" | "vehicles" | "booking" | "tours" | "dashboard";
+type Seat = { id: string; label: string; type: "driver" | "seat" | "aisle" | "empty"; booked?: boolean };
 
 // ─── Data ─────────────────────────────────────────────────────────────────────
 const reviewsData = [
@@ -187,7 +192,7 @@ function BookingStepIndicator({ step }: { step: number }) {
 }
 
 // ─── Navbar ───────────────────────────────────────────────────────────────────
-function Navbar({ page, navigate, dark, setDark }: { page: Page; navigate: (p: Page) => void; dark: boolean; setDark: (v: boolean) => void }) {
+function Navbar({ dark, setDark }: { dark: boolean; setDark: (v: boolean) => void }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const { currentUser, userData, logout } = useAuth();
 
@@ -198,10 +203,13 @@ function Navbar({ page, navigate, dark, setDark }: { page: Page; navigate: (p: P
     { label: "Dashboard", page: "dashboard" as Page },
   ];
 
+  const navigate = useNavigate();
+  const location = useLocation();
+
   return (
     <nav className="fixed top-0 left-0 right-0 z-50 bg-white/80 backdrop-blur-xl border-b border-blue-100 shadow-sm">
       <div className="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between">
-        <button onClick={() => navigate("home")} className="flex items-center gap-2">
+        <Link to="/home" className="flex items-center gap-2">
           <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-blue-600 to-sky-500 flex items-center justify-center shadow-lg">
             <Globe size={18} className="text-white" />
           </div>
@@ -209,14 +217,14 @@ function Navbar({ page, navigate, dark, setDark }: { page: Page; navigate: (p: P
             <div className="font-black text-blue-700 text-lg tracking-tight" style={{ fontFamily: "var(--font-heading)" }}>Pari Travels</div>
             <div className="text-[10px] text-blue-400 -mt-1 font-medium tracking-wider">PREMIUM JOURNEYS</div>
           </div>
-        </button>
+        </Link>
 
         <div className="hidden md:flex items-center gap-1">
           {navLinks.map((l) => (
-            <button key={l.page} onClick={() => navigate(l.page)}
-              className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${page === l.page ? "bg-blue-50 text-blue-700" : "text-gray-600 hover:text-blue-700 hover:bg-blue-50"}`}>
+            <Link key={l.page} to={`/${l.page}`}
+              className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${location.pathname.includes(l.page) ? "bg-blue-50 text-blue-700" : "text-gray-600 hover:text-blue-700 hover:bg-blue-50"}`}>
               {l.label}
-            </button>
+            </Link>
           ))}
         </div>
 
@@ -231,11 +239,11 @@ function Navbar({ page, navigate, dark, setDark }: { page: Page; navigate: (p: P
               <button onClick={() => logout()} className="px-4 py-2 text-sm font-semibold text-red-600 hover:bg-red-50 rounded-lg transition-colors">Logout</button>
             </div>
           ) : (
-            <button onClick={() => navigate("login")} className="hidden md:block px-4 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-50 rounded-lg transition-colors">Login</button>
+            <Link to="/login" className="hidden md:block px-4 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-50 rounded-lg transition-colors">Login</Link>
           )}
-          <button onClick={() => navigate("booking")} className="hidden md:flex items-center gap-1.5 px-4 py-2 bg-gradient-to-r from-blue-600 to-sky-500 text-white text-sm font-semibold rounded-lg shadow-md hover:shadow-lg hover:opacity-90 transition-all">
+          <Link to="/booking" className="hidden md:flex items-center gap-1.5 px-4 py-2 bg-gradient-to-r from-blue-600 to-sky-500 text-white text-sm font-semibold rounded-lg shadow-md hover:shadow-lg hover:opacity-90 transition-all">
             <Car size={14} /> Book Now
-          </button>
+          </Link>
           <button onClick={() => setMenuOpen(!menuOpen)} className="md:hidden w-9 h-9 rounded-lg border border-blue-100 flex items-center justify-center text-blue-600">
             {menuOpen ? <X size={18} /> : <Menu size={18} />}
           </button>
@@ -244,14 +252,14 @@ function Navbar({ page, navigate, dark, setDark }: { page: Page; navigate: (p: P
 
       {menuOpen && (
         <div className="md:hidden bg-white border-t border-blue-50 px-4 py-3 space-y-1">
-          {navLinks.map((l) => (
-            <button key={l.page} onClick={() => { navigate(l.page); setMenuOpen(false); }}
-              className={`w-full text-left px-4 py-2.5 rounded-lg text-sm font-medium transition-colors ${page === l.page ? "bg-blue-50 text-blue-700" : "text-gray-600"}`}>
+          {navLinks.map(l => (
+            <Link key={l.page} to={`/${l.page}`} onClick={() => setMenuOpen(false)}
+              className={`block w-full text-left px-4 py-2.5 rounded-lg text-sm font-medium transition-colors ${location.pathname.includes(l.page) ? "bg-blue-50 text-blue-700" : "text-gray-600"}`}>
               {l.label}
-            </button>
+            </Link>
           ))}
-          <button onClick={() => { navigate("login"); setMenuOpen(false); }} className="w-full text-left px-4 py-2.5 rounded-lg text-sm font-medium text-gray-600">Login</button>
-          <button onClick={() => { navigate("booking"); setMenuOpen(false); }} className="w-full bg-blue-600 text-white px-4 py-2.5 rounded-lg text-sm font-semibold">Book Now</button>
+          {!currentUser && <Link to="/login" onClick={() => setMenuOpen(false)} className="block w-full text-left px-4 py-2.5 rounded-lg text-sm font-medium text-gray-600">Login</Link>}
+          <Link to="/booking" onClick={() => setMenuOpen(false)} className="block w-full bg-blue-600 text-white px-4 py-2.5 rounded-lg text-sm font-semibold">Book Now</Link>
         </div>
       )}
     </nav>
@@ -259,7 +267,7 @@ function Navbar({ page, navigate, dark, setDark }: { page: Page; navigate: (p: P
 }
 
 // ─── Home Page ────────────────────────────────────────────────────────────────
-function HomePage({ navigate }: { navigate: (p: Page, params?: SearchFilters) => void }) {
+function HomePage() {
   const { userData } = useAuth();
   const [openFaq, setOpenFaq] = useState<number | null>(null);
   const [searchForm, setSearchForm] = useState({ from: "", to: "", date: "", returnDate: "", passengers: 1, vehicleType: "suv" });
@@ -267,6 +275,7 @@ function HomePage({ navigate }: { navigate: (p: Page, params?: SearchFilters) =>
   const [featuredVehicles, setFeaturedVehicles] = useState<VehicleItem[]>([]);
   const [featuredTours, setFeaturedTours] = useState<any[]>([]);
   const [sponsors, setSponsors] = useState<any[]>([]);
+  const navigate = useNavigate();
 
   useEffect(() => {
     const loadData = async () => {
@@ -428,7 +437,7 @@ function HomePage({ navigate }: { navigate: (p: Page, params?: SearchFilters) =>
                 </div>
               </div>
             </div>
-            <button onClick={() => navigate("booking", { from: searchForm.from.trim(), to: searchForm.to.trim(), date: searchForm.date })}
+            <button onClick={() => navigate("/booking", { state: { from: searchForm.from.trim(), to: searchForm.to.trim(), date: searchForm.date } })}
               disabled={!searchForm.from.trim() || !searchForm.to.trim()}
               className="w-full disabled:cursor-not-allowed disabled:bg-slate-500 bg-gradient-to-r from-sky-400 to-blue-600 text-white font-bold py-3.5 rounded-xl flex items-center justify-center gap-2 hover:opacity-90 transition-all shadow-xl shadow-blue-900/30 text-base">
               <Search size={18} /> Search Available Vehicles
@@ -510,9 +519,9 @@ function HomePage({ navigate }: { navigate: (p: Page, params?: SearchFilters) =>
               <span className="text-blue-600 font-semibold text-sm tracking-widest uppercase">Our Fleet</span>
               <h2 className="text-4xl font-black text-gray-900 mt-1" style={{ fontFamily: "var(--font-heading)" }}>Featured Vehicles</h2>
             </div>
-            <button onClick={() => navigate("vehicles")} className="flex items-center gap-1 text-blue-600 font-semibold text-sm hover:gap-2 transition-all">
+            <Link to="/vehicles" className="flex items-center gap-1 text-blue-600 font-semibold text-sm hover:gap-2 transition-all">
               View All <ArrowRight size={16} />
-            </button>
+            </Link>
           </div>
           <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
             {featuredVehicles.length === 0 ? (
@@ -546,9 +555,9 @@ function HomePage({ navigate }: { navigate: (p: Page, params?: SearchFilters) =>
                   <div className="flex flex-wrap gap-1 mb-4">
                     {v.features.map((f) => <span key={f} className="text-xs bg-blue-50 text-blue-600 px-2 py-0.5 rounded-full font-medium">{f}</span>)}
                   </div>
-                  <button onClick={() => navigate("booking")} className="w-full py-2.5 bg-gradient-to-r from-blue-600 to-sky-500 text-white font-semibold rounded-xl text-sm hover:opacity-90 transition-opacity">
+                  <Link to="/booking" className="block text-center w-full py-2.5 bg-gradient-to-r from-blue-600 to-sky-500 text-white font-semibold rounded-xl text-sm hover:opacity-90 transition-opacity">
                     Book Now
-                  </button>
+                  </Link>
                 </div>
               </div>
             ))}
@@ -564,9 +573,9 @@ function HomePage({ navigate }: { navigate: (p: Page, params?: SearchFilters) =>
               <span className="text-blue-600 font-semibold text-sm tracking-widest uppercase">Destinations</span>
               <h2 className="text-4xl font-black text-gray-900 mt-1" style={{ fontFamily: "var(--font-heading)" }}>Popular Tours</h2>
             </div>
-            <button onClick={() => navigate("tours")} className="flex items-center gap-1 text-blue-600 font-semibold text-sm hover:gap-2 transition-all">
+            <Link to="/tours" className="flex items-center gap-1 text-blue-600 font-semibold text-sm hover:gap-2 transition-all">
               View All <ArrowRight size={16} />
-            </button>
+            </Link>
           </div>
           <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
             {featuredTours.length === 0 ? (
@@ -605,9 +614,9 @@ function HomePage({ navigate }: { navigate: (p: Page, params?: SearchFilters) =>
                       </span>
                     ))}
                   </div>
-                  <button onClick={() => navigate("tours")} className="w-full py-2.5 bg-gradient-to-r from-blue-600 to-sky-500 text-white font-semibold rounded-xl text-sm hover:opacity-90 transition-opacity">
+                  <Link to="/tours" className="block text-center w-full py-2.5 bg-gradient-to-r from-blue-600 to-sky-500 text-white font-semibold rounded-xl text-sm hover:opacity-90 transition-opacity">
                     View Details
-                  </button>
+                  </Link>
                 </div>
               </div>
             ))}
@@ -728,17 +737,18 @@ function HomePage({ navigate }: { navigate: (p: Page, params?: SearchFilters) =>
 }
 
 // ─── Auth Pages ───────────────────────────────────────────────────────────────
-function LoginPage({ navigate }: { navigate: (p: Page) => void }) {
+function LoginPage() {
   const [form, setForm] = useState({ email: "", password: "" });
   const { login, loginWithGoogle } = useAuth();
   const [loading, setLoading] = useState(false);
+  const navigate = useNavigate();
   
   const handleLogin = async () => {
     setLoading(true);
     try {
       const userProfile = await login(form.email, form.password);
       if (userProfile?.role === "admin") {
-        navigate("admin");
+        navigate("/admin");
       } else {
         navigate("home");
       }
@@ -777,7 +787,7 @@ function LoginPage({ navigate }: { navigate: (p: Page) => void }) {
               </div>
             </div>
             <div className="flex justify-end">
-              <button onClick={() => navigate("forgot")} className="text-sky-300 text-sm hover:text-white transition-colors">Forgot Password?</button>
+              <Link to="/forgot" className="text-sky-300 text-sm hover:text-white transition-colors">Forgot Password?</Link>
             </div>
             <button onClick={handleLogin} disabled={loading} className="w-full bg-gradient-to-r from-blue-500 to-sky-400 text-white font-bold py-3.5 rounded-xl hover:opacity-90 transition-opacity shadow-xl shadow-blue-900/30 disabled:opacity-50">
               {loading ? "Signing In..." : "Sign In"}
@@ -787,7 +797,7 @@ function LoginPage({ navigate }: { navigate: (p: Page) => void }) {
               <span className="relative bg-transparent px-3 text-white/40 text-xs">or continue with</span>
             </div>
             <div className="grid grid-cols-2 gap-3">
-              <button onClick={async () => { await loginWithGoogle(); navigate("home"); }} className="flex items-center justify-center gap-2 bg-white/10 border border-white/20 rounded-xl py-3 text-white text-sm font-medium hover:bg-white/20 transition-colors">
+              <button onClick={async () => { await loginWithGoogle(); navigate("/home"); }} className="flex items-center justify-center gap-2 bg-white/10 border border-white/20 rounded-xl py-3 text-white text-sm font-medium hover:bg-white/20 transition-colors">
                 <svg className="w-4 h-4" viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
                 Google
               </button>
@@ -798,7 +808,7 @@ function LoginPage({ navigate }: { navigate: (p: Page) => void }) {
           </div>
           <p className="text-center text-white/50 text-sm mt-6">
             Don't have an account?{" "}
-            <button onClick={() => navigate("register")} className="text-sky-300 font-semibold hover:text-white transition-colors">Create Account</button>
+            <Link to="/register" className="text-sky-300 font-semibold hover:text-white transition-colors">Create Account</Link>
           </p>
         </div>
       </div>
@@ -806,10 +816,11 @@ function LoginPage({ navigate }: { navigate: (p: Page) => void }) {
   );
 }
 
-function RegisterPage({ navigate }: { navigate: (p: Page) => void }) {
+function RegisterPage() {
   const [form, setForm] = useState({ name: "", mobile: "", email: "", password: "", confirm: "", terms: false });
   const { register } = useAuth();
   const [loading, setLoading] = useState(false);
+  const navigate = useNavigate();
 
   const handleRegister = async () => {
     if (form.password !== form.confirm) return alert("Passwords do not match");
@@ -818,7 +829,7 @@ function RegisterPage({ navigate }: { navigate: (p: Page) => void }) {
     try {
       await register(form.email, form.password, form.name, form.mobile);
       alert('Account created successfully! Please sign in with your account.');
-      navigate("login");
+      navigate("/login");
     } catch (err: any) {
       console.error('Registration error:', err);
       let msg = '';
@@ -871,7 +882,7 @@ function RegisterPage({ navigate }: { navigate: (p: Page) => void }) {
           </div>
           <p className="text-center text-white/50 text-sm mt-5">
             Already have an account?{" "}
-            <button onClick={() => navigate("login")} className="text-sky-300 font-semibold hover:text-white transition-colors">Sign In</button>
+            <Link to="/login" className="text-sky-300 font-semibold hover:text-white transition-colors">Sign In</Link>
           </p>
         </div>
       </div>
@@ -879,9 +890,10 @@ function RegisterPage({ navigate }: { navigate: (p: Page) => void }) {
   );
 }
 
-function ForgotPage({ navigate }: { navigate: (p: Page) => void }) {
+function ForgotPage() {
   const [email, setEmail] = useState("");
   const [sent, setSent] = useState(false);
+  const navigate = useNavigate();
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-900 via-blue-800 to-sky-900 px-4 pt-20">
       <div className="w-full max-w-sm">
@@ -909,14 +921,14 @@ function ForgotPage({ navigate }: { navigate: (p: Page) => void }) {
               </div>
               <h2 className="text-2xl font-black text-white mb-2" style={{ fontFamily: "var(--font-heading)" }}>Email Sent!</h2>
               <p className="text-white/60 text-sm mb-6">Check your inbox for the password reset link. It expires in 30 minutes.</p>
-              <button onClick={() => navigate("login")} className="w-full bg-gradient-to-r from-blue-500 to-sky-400 text-white font-bold py-3.5 rounded-xl hover:opacity-90 transition-opacity">
+              <Link to="/login" className="block w-full bg-gradient-to-r from-blue-500 to-sky-400 text-white font-bold py-3.5 rounded-xl hover:opacity-90 transition-opacity">
                 Back to Login
-              </button>
+              </Link>
             </>
           )}
-          <button onClick={() => navigate("login")} className="mt-4 text-white/50 text-sm hover:text-white transition-colors flex items-center gap-1 mx-auto">
+          <Link to="/login" className="mt-4 text-white/50 text-sm hover:text-white transition-colors flex items-center gap-1 mx-auto">
             <ArrowLeft size={14} /> Back to Login
-          </button>
+          </Link>
         </div>
       </div>
     </div>
@@ -924,13 +936,14 @@ function ForgotPage({ navigate }: { navigate: (p: Page) => void }) {
 }
 
 // ─── Vehicles Page ────────────────────────────────────────────────────────────
-function VehiclesPage({ navigate }: { navigate: (p: Page) => void }) {
+function VehiclesPage() {
   const [category, setCategory] = useState("all");
   const [maxPrice, setMaxPrice] = useState(20000);
   const [acOnly, setAcOnly] = useState(false);
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
   const [vehicles, setVehicles] = useState<VehicleItem[]>([]);
   const [loadingVehicles, setLoadingVehicles] = useState(true);
+  const navigate = useNavigate();
 
   const categories = [
     { id: "all", label: "All Vehicles" },
@@ -1058,7 +1071,7 @@ function VehiclesPage({ navigate }: { navigate: (p: Page) => void }) {
                       <span className="flex items-center gap-1"><Users size={12} />{v.capacity} seats</span>
                       {v.ac && <span className="text-green-600 font-medium text-xs">✓ AC</span>}
                     </div>
-                    <div className="flex flex-wrap gap-1 mb-3">
+                    <div className="flex flex-wrap gap-1 mb-3 min-h-[20px]">
                       {v.features.slice(0, 3).map(f => <span key={f} className="text-xs bg-blue-50 text-blue-600 px-2 py-0.5 rounded-full">{f}</span>)}
                     </div>
                     <button onClick={() => navigate("booking")} className="w-full py-2 bg-gradient-to-r from-blue-600 to-sky-500 text-white font-semibold rounded-xl text-sm hover:opacity-90 transition-opacity">
@@ -1076,8 +1089,11 @@ function VehiclesPage({ navigate }: { navigate: (p: Page) => void }) {
 }
 
 // ─── Booking Flow ─────────────────────────────────────────────────────────────
-function BookingFlowPage({ navigate, initialFrom, initialTo, initialDate }: { navigate: (p: Page, params?: SearchFilters) => void; initialFrom?: string; initialTo?: string; initialDate?: string }) {
+function BookingFlowPage() {
   const { currentUser } = useAuth();
+  const navigate = useNavigate();
+  const location = useLocation();
+  const { from: initialFrom, to: initialTo, date: initialDate } = (location.state as SearchFilters) || {};
   const [step, setStep] = useState(1);
   const [from, setFrom] = useState(initialFrom || "Pune");
   const [to, setTo] = useState(initialTo || "Goa");
@@ -1094,6 +1110,7 @@ function BookingFlowPage({ navigate, initialFrom, initialTo, initialDate }: { na
   const [isCreating, setIsCreating] = useState(false);
   const [bookingSavedId, setBookingSavedId] = useState<string | null>(null);
   const [availableVehicles, setAvailableVehicles] = useState<VehicleItem[]>([]);
+  const ticketRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const fetchVehicles = async () => {
@@ -1198,7 +1215,7 @@ function BookingFlowPage({ navigate, initialFrom, initialTo, initialDate }: { na
   const handleConfirmBooking = async () => {
     if (!currentUser) {
       alert("Please sign in first to complete your booking.");
-      navigate("login");
+      navigate("/login");
       return;
     }
 
@@ -1272,6 +1289,27 @@ function BookingFlowPage({ navigate, initialFrom, initialTo, initialDate }: { na
     } finally {
       setIsCreating(false);
     }
+  };
+
+  const handleDownloadTicket = () => {
+    if (!ticketRef.current) {
+      console.error("Ticket element not found.");
+      return;
+    }
+
+    html2canvas(ticketRef.current, {
+      scale: 2, // Use a higher scale for better resolution
+      useCORS: true, // This helps with loading external images if any
+    }).then((canvas) => {
+      const imgData = canvas.toDataURL('image/png');
+      const pdf = new jsPDF({
+        orientation: 'portrait',
+        unit: 'px',
+        format: [canvas.width, canvas.height]
+      });
+      pdf.addImage(imgData, 'PNG', 0, 0, canvas.width, canvas.height);
+      pdf.save(`PariTravels-Ticket-${bookingId}.pdf`);
+    });
   };
 
   return (
@@ -1564,7 +1602,7 @@ function BookingFlowPage({ navigate, initialFrom, initialTo, initialDate }: { na
         {/* Step 6: E-Ticket */}
         {step === 6 && (
           <div className="max-w-2xl mx-auto">
-            <div className="bg-white rounded-3xl overflow-hidden shadow-xl border border-blue-50">
+            <div ref={ticketRef} className="bg-white rounded-3xl overflow-hidden shadow-xl border border-blue-50">
               {/* Ticket Header */}
               <div className="bg-gradient-to-r from-blue-700 to-sky-600 p-6 text-white">
                 <div className="flex items-center justify-between mb-4">
@@ -1620,15 +1658,15 @@ function BookingFlowPage({ navigate, initialFrom, initialTo, initialDate }: { na
                 </div>
 
                 {/* QR Code placeholder */}
-                <div className="flex items-center gap-4 p-4 bg-blue-50 rounded-2xl">
-                  <div className="w-20 h-20 bg-white rounded-xl p-2 border border-blue-100">
-                    <svg viewBox="0 0 100 100" className="w-full h-full">
-                      {[...Array(10)].map((_, r) =>
-                        [...Array(10)].map((_, c) =>
-                          Math.random() > 0.5 ? <rect key={`${r}-${c}`} x={c * 10} y={r * 10} width={9} height={9} fill="#1A56DB" rx={1} /> : null
-                        )
-                      )}
-                    </svg>
+                <div className="flex items-center gap-4 p-4 bg-blue-50 rounded-2xl border border-blue-100">
+                  <div className="w-20 h-20 bg-white rounded-xl p-2 border border-blue-100 flex items-center justify-center">
+                    <QRCode
+                      value={bookingId}
+                      size={64} // 64x64 pixels to fit inside the padded container
+                      level="H" // High error correction for better scannability
+                      bgColor="#FFFFFF"
+                      fgColor="#000000"
+                    />
                   </div>
                   <div>
                     <p className="text-sm font-bold text-gray-900 mb-1">Scan to Verify</p>
@@ -1636,16 +1674,15 @@ function BookingFlowPage({ navigate, initialFrom, initialTo, initialDate }: { na
                   </div>
                 </div>
 
-                <div className="flex gap-3 mt-5">
-                  <button onClick={() => navigate("dashboard")}
-                    className="flex-1 py-3 bg-gradient-to-r from-blue-600 to-sky-500 text-white font-bold rounded-xl hover:opacity-90 transition-opacity">
-                    View My Bookings
-                  </button>
-                  <button className="flex items-center gap-2 px-5 py-3 border border-blue-200 text-blue-600 font-semibold rounded-xl hover:bg-blue-50 transition-colors">
-                    <Download size={16} /> Download
-                  </button>
-                </div>
               </div>
+            </div>
+            <div className="flex gap-3 mt-5">
+              <button onClick={() => navigate("/dashboard")} className="flex-1 py-3 bg-gradient-to-r from-blue-600 to-sky-500 text-white font-bold rounded-xl hover:opacity-90 transition-opacity">
+                View My Bookings
+              </button>
+              <button onClick={handleDownloadTicket} className="flex items-center gap-2 px-5 py-3 border border-blue-200 text-blue-600 font-semibold rounded-xl hover:bg-blue-50 transition-colors">
+                <Download size={16} /> Download
+              </button>
             </div>
           </div>
         )}
@@ -1655,10 +1692,11 @@ function BookingFlowPage({ navigate, initialFrom, initialTo, initialDate }: { na
 }
 
 // ─── Tours Page ───────────────────────────────────────────────────────────────
-function ToursPage({ navigate }: { navigate: (p: Page) => void }) {
+function ToursPage() {
   const [selectedCategory, setSelectedCategory] = useState("all");
   const [maxBudget, setMaxBudget] = useState(35000);
   const [tours, setTours] = useState<any[]>([]);
+  const navigate = useNavigate();
 
   useEffect(() => {
     const loadTours = async () => {
@@ -1746,7 +1784,7 @@ function ToursPage({ navigate }: { navigate: (p: Page) => void }) {
                   ))}
                 </div>
                 <div className="flex gap-2">
-                  <button onClick={() => navigate("booking")} className="flex-1 py-2.5 bg-gradient-to-r from-blue-600 to-sky-500 text-white font-semibold rounded-xl text-sm hover:opacity-90">Book Now</button>
+                  <button onClick={() => navigate("/tour-booking", { state: { tour: t } })} className="flex-1 py-2.5 bg-gradient-to-r from-blue-600 to-sky-500 text-white font-semibold rounded-xl text-sm hover:opacity-90">Book Now</button>
                   <button className="px-3 py-2.5 border border-blue-100 rounded-xl text-blue-600 hover:bg-blue-50 transition-colors">
                     <Heart size={16} />
                   </button>
@@ -1761,7 +1799,7 @@ function ToursPage({ navigate }: { navigate: (p: Page) => void }) {
 }
 
 // ─── Customer Dashboard ───────────────────────────────────────────────────────
-function CustomerDashboard({ navigate }: { navigate: (p: Page) => void }) {
+function CustomerDashboard() {
   const { currentUser, logout } = useAuth();
   const [bookings, setBookings] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -1788,7 +1826,7 @@ function CustomerDashboard({ navigate }: { navigate: (p: Page) => void }) {
 
   const handleLogout = async () => {
     await logout();
-    navigate("home");
+    navigate("/");
   };
 
   if (!currentUser) {
@@ -1797,7 +1835,7 @@ function CustomerDashboard({ navigate }: { navigate: (p: Page) => void }) {
         <div className="bg-white p-8 rounded-2xl shadow-lg text-center">
           <h2 className="text-2xl font-bold text-gray-900 mb-4">Access Denied</h2>
           <p className="text-gray-600 mb-6">Please log in to view your dashboard.</p>
-          <button onClick={() => navigate("login")} className="bg-blue-600 text-white px-6 py-3 rounded-xl font-semibold hover:bg-blue-700 transition">
+          <button onClick={() => navigate("/login")} className="bg-blue-600 text-white px-6 py-3 rounded-xl font-semibold hover:bg-blue-700 transition">
             Go to Login
           </button>
         </div>
@@ -1810,7 +1848,7 @@ function CustomerDashboard({ navigate }: { navigate: (p: Page) => void }) {
       {/* Header */}
       <div className="bg-gradient-to-r from-blue-700 to-sky-600 py-8 px-4">
         <div className="max-w-6xl mx-auto flex items-center justify-between">
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-4 flex-wrap">
             <button onClick={() => navigate("home")} className="flex items-center gap-2 text-white hover:bg-white/20 px-4 py-2 rounded-lg transition">
               <ArrowLeft size={20} /> Back
             </button>
@@ -1862,7 +1900,7 @@ function CustomerDashboard({ navigate }: { navigate: (p: Page) => void }) {
                 <Ticket size={48} className="mx-auto text-gray-300 mb-4" />
                 <h3 className="text-xl font-semibold text-gray-900 mb-2">No Bookings Yet</h3>
                 <p className="text-gray-600 mb-6">You haven't made any bookings. Let's book your first journey!</p>
-                <button onClick={() => navigate("booking")} className="bg-blue-600 text-white px-6 py-3 rounded-xl font-semibold hover:bg-blue-700 transition">
+                <button onClick={() => navigate("/booking")} className="bg-blue-600 text-white px-6 py-3 rounded-xl font-semibold hover:bg-blue-700 transition">
                   Book Now
                 </button>
               </div>
@@ -2015,38 +2053,33 @@ function CustomerDashboard({ navigate }: { navigate: (p: Page) => void }) {
 
 // ─── App Root ─────────────────────────────────────────────────────────────────
 export default function App() {
-  const [page, setPage] = useState<Page>("home");
   const [dark, setDark] = useState(false);
+  const location = useLocation();
 
-  const [searchFilters, setSearchFilters] = useState<SearchFilters>({ from: "Pune", to: "Goa", date: "2025-06-20" });
-
-  const navigate = (p: Page, params?: SearchFilters) => {
-    if (p === "admin") {
-      window.location.href = "/admin";
-      return;
-    }
-    if (params) {
-      setSearchFilters((prev) => ({ ...prev, ...params }));
-    }
-    setPage(p);
+  useEffect(() => {
     window.scrollTo({ top: 0, behavior: "smooth" });
-  };
+  }, [location.pathname]);
 
-  const showNav = !["login", "register", "forgot"].includes(page);
+  const showNav = !["/login", "/register", "/forgot"].includes(location.pathname);
 
   return (
     <div className={dark ? "dark" : ""}>
       <div className={`bg-background text-foreground min-h-screen ${dark ? "bg-gray-950 text-white" : ""}`}>
-        {showNav && <Navbar page={page} navigate={navigate} dark={dark} setDark={setDark} />}
+        {showNav && <Navbar dark={dark} setDark={setDark} />}
 
-        {page === "home" && <HomePage navigate={navigate} />}
-        {page === "login" && <LoginPage navigate={navigate} />}
-        {page === "register" && <RegisterPage navigate={navigate} />}
-        {page === "forgot" && <ForgotPage navigate={navigate} />}
-        {page === "vehicles" && <VehiclesPage navigate={navigate} />}
-        {page === "booking" && <BookingFlowPage navigate={navigate} initialFrom={searchFilters.from} initialTo={searchFilters.to} initialDate={searchFilters.date} />}
-        {page === "tours" && <ToursPage navigate={navigate} />}
-        {page === "dashboard" && <CustomerDashboard navigate={navigate} />}
+        <Routes>
+          <Route index element={<HomePage />} />
+          <Route path="/home" element={<HomePage />} />
+          <Route path="/login" element={<LoginPage />} />
+          <Route path="/register" element={<RegisterPage />} />
+          <Route path="/forgot" element={<ForgotPage />} />
+          <Route path="/vehicles" element={<VehiclesPage />} />
+          <Route path="/booking" element={<BookingFlowPage />} />
+          <Route path="/tour-booking" element={<TourBookingPage />} />
+          <Route path="/booking-success" element={<BookingSuccessPage />} />
+          <Route path="/tours" element={<ToursPage />} />
+          <Route path="/dashboard" element={<CustomerDashboard />} />
+        </Routes>
       </div>
     </div>
   );
